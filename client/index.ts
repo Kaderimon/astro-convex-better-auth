@@ -5,7 +5,7 @@ import {
 } from "@convex-dev/better-auth/client/plugins"
 import { anonymousClient } from "better-auth/client/plugins"
 
-const authClient = createAuthClient({
+const authClient: ReturnType<typeof createAuthClient> = createAuthClient({
   baseURL: import.meta.env.PUBLIC_CONVEX_SITE_URL,
   plugins: [convexClient(), crossDomainClient(), anonymousClient()],
 })

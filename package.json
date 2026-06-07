@@ -2,15 +2,52 @@
   "name": "astro-convex-better-auth",
   "version": "0.1.0",
   "description": "Astro plugin to have auth server-side",
-  "main": "index.js",
+  "main": "./dist/index.mjs",
+  "module": "./dist/index.mjs",
+  "types": "./dist/index.d.mts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.mjs",
+      "types": "./dist/index.d.mts"
+    },
+    "./server": {
+      "import": "./dist/server/index.mjs",
+      "types": "./dist/server/index.d.mts"
+    },
+    "./client": {
+      "import": "./dist/client/index.mjs",
+      "types": "./dist/client/index.d.mts"
+    }
+  },
+  "files": [
+    "dist"
+  ],
   "scripts": {
+    "build": "tsdown",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "keywords": [
+    "auth",
+    "authentication",
     "astro",
+    "astro-integration",
+    "better-auth",
     "convex",
-    "better-auth"
+    "typescript"
   ],
   "author": "",
-  "license": "MIT"
+  "type": "module",
+  "license": "MIT",
+  "devDependencies": {
+    "@convex-dev/better-auth": "^0.12.2",
+    "astro": "^6.4.4",
+    "better-auth": "^1.6.14",
+    "tsdown": "^0.22.2",
+    "typescript": "^6.0.3"
+  },
+  "peerDependencies": {
+    "@convex-dev/better-auth": "^0.12.2",
+    "astro": "^6.4.4",
+    "better-auth": "^1.6.14"
+  }
 }

@@ -1,22 +1,25 @@
 import { getToken as _getToken } from "@convex-dev/better-auth/utils"
-
-const CONVEX_SITE_URL = import.meta.env.PUBLIC_CONVEX_SITE_URL as string
+import { getConvexSiteUrl } from "./env"
 
 export async function getConvexToken(headers: Headers) {
+  const siteUrl = getConvexSiteUrl()
   const clean = new Headers(headers)
   clean.delete("content-length")
   clean.delete("transfer-encoding")
   clean.set("accept-encoding", "identity")
-  const result = await _getToken(CONVEX_SITE_URL, clean)
+  const result = await _getToken(siteUrl, clean, {
+    jwtCache: { enabled: true },
+  })
   return result.token ?? null
 }
 
 export function authHandler(request: Request): Promise<Response> {
+  const siteUrl = getConvexSiteUrl()
   const url = new URL(request.url)
-  const target = `${CONVEX_SITE_URL}${url.pathname}${url.search}`
+  const target = `${siteUrl}${url.pathname}${url.search}`
   const headers = new Headers(request.headers)
-  headers.set("accept-encoding", "application/json")
-  headers.set("host", new URL(CONVEX_SITE_URL).host)
+  headers.set("accept-encoding", "identity")
+  headers.set("host", new URL(siteUrl).host)
   headers.set("x-forwarded-host", url.host)
   headers.set("x-forwarded-proto", url.protocol.replace(/:$/, ""))
   headers.set("x-better-auth-forwarded-host", url.host)

@@ -13,6 +13,7 @@ A thin Astro integration that wires [`@convex-dev/better-auth`](https://github.c
 **Packages**
 
 ```
+astro-convex-better-auth
 @convex-dev/better-auth
 better-auth
 convex
@@ -34,7 +35,7 @@ convex
 ### 1. Astro integration — `astro.config.mjs`
 
 ```js
-import convexBetterAuth from "./src/lib/convex-better-auth"
+import convexBetterAuth from "astro-convex-better-auth"
 
 export default defineConfig({
   output: "server", // or "hybrid"
@@ -64,7 +65,7 @@ declare namespace App {
 ### 3. Middleware — `src/middleware.ts`
 
 ```ts
-import { convexBetterAuthMiddleware } from "./lib/convex-better-auth/server/middleware"
+import { convexBetterAuthMiddleware } from "astro-convex-better-auth/server"
 import { defineMiddleware, sequence } from "astro:middleware"
 
 const authGuard = defineMiddleware((context, next) => {
@@ -97,7 +98,7 @@ convexBetterAuthMiddleware({ includeConvexToken: true })
 
 ```ts
 import type { APIRoute } from "astro"
-import { authHandler } from "../../../lib/convex-better-auth/server/auth-server"
+import { authHandler } from "astro-convex-better-auth/server"
 
 export const ALL: APIRoute = ({ request }) => authHandler(request)
 ```
@@ -120,30 +121,12 @@ const isAnonymous = (user as any)?.isAnonymous === true
 ---
 ```
 
-### Client-side setup — `src/lib/convex-better-auth/client/index.ts`
+### Client-side auth client
 
-The auth client is pre-configured with the plugins needed for Convex:
-
-```ts
-import { createAuthClient } from "better-auth/react"
-import {
-  convexClient,
-  crossDomainClient,
-} from "@convex-dev/better-auth/client/plugins"
-import { anonymousClient } from "better-auth/client/plugins"
-
-const authClient = createAuthClient({
-  baseURL: import.meta.env.PUBLIC_CONVEX_SITE_URL,
-  plugins: [convexClient(), crossDomainClient(), anonymousClient()],
-})
-
-export default authClient
-```
-
-Import it wherever you need auth on the client:
+Import the pre-configured auth client wherever you need auth on the client:
 
 ```ts
-import authClient from "../../lib/convex-better-auth/client"
+import authClient from "astro-convex-better-auth/client"
 ```
 
 ### Client-side usage (React components)
@@ -165,7 +148,7 @@ await authClient.signUp.email({ name, email, password, callbackURL: "/" })
 **After a successful sign-in, sync cookies to the browser** so the next SSR request includes them:
 
 ```ts
-import { syncCookiesToDocument } from "../../lib/auth-cookies"
+import { syncCookiesToDocument } from "astro-convex-better-auth/client"
 
 // call immediately after authClient.signIn.*
 syncCookiesToDocument()
@@ -178,8 +161,10 @@ syncCookiesToDocument()
 Use `ConvexBetterAuthProvider` from `@convex-dev/better-auth/react` to gate UI behind a valid Convex session:
 
 ```tsx
+import authClient, { convexClient } from "astro-convex-better-auth/client"
 import { ConvexBetterAuthProvider } from "@convex-dev/better-auth/react"
 import { Authenticated } from "convex/react"
+
 ;<ConvexBetterAuthProvider client={convexClient} authClient={authClient}>
   <Authenticated>{/* rendered only when authenticated */}</Authenticated>
 </ConvexBetterAuthProvider>

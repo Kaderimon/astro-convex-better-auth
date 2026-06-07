@@ -47,22 +47,19 @@ export default defineConfig({
 })
 ```
 
-### 2. Type declarations — `src/env.d.ts`
+**Optional — auto-inject the middleware** so you don't need to create `src/middleware.ts` at all:
 
-```ts
-/// <reference path="../.astro/types.d.ts" />
-/// <reference types="astro/client" />
-
-declare namespace App {
-  interface Locals {
-    user: import("better-auth").User | null
-    session: import("better-auth").Session | null
-    convexToken?: string | null // only set when middleware is configured with includeConvexToken: true
-  }
-}
+```js
+convexBetterAuth({ autoMiddleware: true })
+// or with options:
+convexBetterAuth({ autoMiddleware: { includeConvexToken: true } })
 ```
 
-### 3. Middleware — `src/middleware.ts`
+When `autoMiddleware` is set, write your own route-protection logic directly in `src/middleware.ts` using `context.locals.user` / `context.locals.session` — do **not** also call `convexBetterAuthMiddleware()` there or it will execute twice.
+
+The integration automatically injects `App.Locals` types (`user`, `session`, `convexToken`) into your project via Astro's `injectTypes()` — no manual `src/env.d.ts` declarations needed.
+
+### 2. Middleware — `src/middleware.ts`
 
 ```ts
 import { convexBetterAuthMiddleware } from "astro-convex-better-auth/server"
@@ -94,7 +91,17 @@ convexBetterAuthMiddleware({ includeConvexToken: true })
 // context.locals.convexToken will be set (string | null)
 ```
 
-### 4. Auth API catch-all — `src/pages/api/auth/[...all].ts`
+**Optional — skip the `get-session` network call using local JWT verification:**
+
+```ts
+convexBetterAuthMiddleware({ jwtFastPath: true })
+```
+
+When enabled, the middleware verifies `better-auth.convex_jwt` locally against the Convex JWKS endpoint (cached in memory) and skips the `get-session` round-trip on cache hits. Falls back to `get-session` when the JWT is missing or expired.
+
+> **Note**: On a fast-path hit, `context.locals.user` will not contain `id` or `image` unless you override `definePayload` in your Convex backend's Better Auth configuration to include them.
+
+### 3. Auth API catch-all — `src/pages/api/auth/[...all].ts`
 
 ```ts
 import type { APIRoute } from "astro"
@@ -150,11 +157,13 @@ await authClient.signUp.email({ name, email, password, callbackURL: "/" })
 ```ts
 import { syncCookiesToDocument } from "astro-convex-better-auth/client"
 
-// call immediately after authClient.signIn.*
+// call once immediately after authClient.signIn.* or authClient.signUp.*
 syncCookiesToDocument()
 ```
 
-> `better-auth` stores cookies in `localStorage` under the key `better-auth_cookie`. `syncCookiesToDocument()` reads that value and writes each cookie to `document.cookie` so Astro middleware can pick them up on the next request.
+> The Convex auth server (`xxx.convex.site`) is on a different origin from your Astro app, so the browser's cross-origin cookie rules block `Set-Cookie` responses from landing in your app's cookie jar. The `crossDomainClient()` plugin (already included in the pre-configured auth client) intercepts auth responses and stores cookies in `localStorage` instead. `syncCookiesToDocument()` reads them back out and writes them to `document.cookie`, where Astro's SSR middleware can pick them up.
+>
+> You only need to call `syncCookiesToDocument()` **once after sign-in** — cookies written to `document.cookie` persist across page navigations until their 30-day `Max-Age` expires or the user signs out.
 
 ### Wrapping Convex-authenticated components
 
@@ -170,6 +179,39 @@ import { Authenticated } from "convex/react"
 </ConvexBetterAuthProvider>
 ```
 
+**Optional — skip the async client-side token fetch on first hydration:**
+
+When `includeConvexToken: true` is set in the middleware, `context.locals.convexToken` holds a short-lived Convex JWT. Pass it as `initialToken` to `ConvexBetterAuthProvider` so the Convex client starts authenticated immediately — without waiting for the async `authClient.convex.token()` round-trip that would otherwise cause a brief unauthenticated flash:
+
+```astro
+---
+// src/layouts/AuthenticatedLayout.astro
+const initialToken = Astro.locals.convexToken
+---
+
+<MyReactIsland client:load initialToken={initialToken} />
+```
+
+```tsx
+// MyReactIsland.tsx
+import authClient, { convexClient } from "astro-convex-better-auth/client"
+import { ConvexBetterAuthProvider } from "@convex-dev/better-auth/react"
+
+export default function MyReactIsland({ initialToken }: { initialToken?: string | null }) {
+  return (
+    <ConvexBetterAuthProvider
+      client={convexClient}
+      authClient={authClient}
+      initialToken={initialToken}
+    >
+      {/* children render with auth already established */}
+    </ConvexBetterAuthProvider>
+  )
+}
+```
+
+> `initialToken` is consumed only once per module lifetime. In SPA-style navigations (View Transitions), the provider maintains auth state from client-side session tracking after the first hydration.
+
 ---
 
 ## How it works
@@ -177,3 +219,5 @@ import { Authenticated } from "convex/react"
 > **Internals** — not required reading for normal use.
 >
 > On each SSR request the middleware reads the `better-auth.convex_jwt` and `better-auth.session_token` cookies, prefixes them with `__Secure-`, and sends them in a `Better-Auth-Cookie` header to `PUBLIC_CONVEX_SITE_URL/api/auth/get-session`. The JSON response is parsed and mapped to `context.locals.user` / `context.locals.session`. This is why `PUBLIC_CONVEX_SITE_URL` (the `.convex.site` URL, not `.convex.cloud`) is required — that endpoint is an HTTP action on the Convex backend.
+>
+> When `jwtFastPath: true` is set, the middleware first attempts to verify `better-auth.convex_jwt` locally using the JWKS at `PUBLIC_CONVEX_SITE_URL/api/auth/convex/jwks` (fetched once and cached in memory). A valid JWT skips the `get-session` network call entirely.

@@ -11,6 +11,9 @@ importers:
       convex:
         specifier: '>=1.0.0'
         version: 1.40.0(react@19.2.7)
+      jose:
+        specifier: ^6.2.3
+        version: 6.2.3
     devDependencies:
       '@convex-dev/better-auth':
         specifier: ^0.12.2

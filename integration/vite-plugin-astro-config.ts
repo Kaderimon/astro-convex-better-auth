@@ -1,8 +1,12 @@
 import type { AstroConfig } from "astro"
+import type { ConvexBetterAuthMiddlewareOptions } from "../types"
 
 type VitePlugin = Required<AstroConfig["vite"]>["plugins"][number]
 
-export function vitePluginAstroConfig(astroConfig: AstroConfig): VitePlugin {
+export function vitePluginAstroConfig(
+  astroConfig: AstroConfig,
+  middlewareOptions?: ConvexBetterAuthMiddlewareOptions,
+): VitePlugin {
   const virtualModuleId = "virtual:@convex-better-auth/astro/config"
   const resolvedVirtualModuleId = "\0" + virtualModuleId
 
@@ -17,6 +21,7 @@ export function vitePluginAstroConfig(astroConfig: AstroConfig): VitePlugin {
       if (id === resolvedVirtualModuleId) {
         return `
           const configOutput = '${astroConfig.output}';
+          export const middlewareOptions = ${JSON.stringify(middlewareOptions ?? null)};
 
           export function isStaticOutput(forceStatic) {
             if (configOutput === 'hybrid' && forceStatic === undefined) {

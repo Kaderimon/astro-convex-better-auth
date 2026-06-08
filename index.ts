@@ -1,7 +1,6 @@
 import { createIntegration } from "./integration/create-integration"
 
 export { createIntegration }
-export { default as authClient } from "./client"
 export type {
   ConvexBetterAuthLocals,
   ConvexBetterAuthMiddleware,

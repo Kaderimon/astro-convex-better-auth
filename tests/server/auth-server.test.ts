@@ -68,7 +68,9 @@ describe("authHandler", () => {
     await authHandler(makeRequest())
 
     const headers: Headers = mockFetch.mock.calls[0][1].headers
-    expect(headers.get("x-better-auth-forwarded-host")).toBe("myapp.example.com")
+    expect(headers.get("x-better-auth-forwarded-host")).toBe(
+      "myapp.example.com",
+    )
     expect(headers.get("x-better-auth-forwarded-proto")).toBe("http")
   })
 
@@ -104,7 +106,9 @@ describe("getConvexToken", () => {
   })
 
   it("returns token string when getToken resolves with a token", async () => {
-    vi.mocked(getToken).mockResolvedValueOnce({ token: "jwt-token-123" } as never)
+    vi.mocked(getToken).mockResolvedValueOnce({
+      token: "jwt-token-123",
+    } as never)
 
     const result = await getConvexToken(new Headers())
 
@@ -143,7 +147,9 @@ describe("getConvexToken", () => {
     expect(getToken).toHaveBeenCalledWith(
       SITE_URL,
       expect.any(Headers),
-      expect.objectContaining({ jwtCache: { enabled: true } }),
+      expect.objectContaining({
+        jwtCache: { enabled: true, isAuthError: expect.any(Function) },
+      }),
     )
   })
 })

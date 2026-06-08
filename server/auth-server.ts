@@ -8,7 +8,7 @@ export async function getConvexToken(headers: Headers) {
   clean.delete("transfer-encoding")
   clean.set("accept-encoding", "identity")
   const result = await _getToken(siteUrl, clean, {
-    jwtCache: { enabled: true },
+    jwtCache: { enabled: true, isAuthError: () => false },
   })
   return result.token ?? null
 }

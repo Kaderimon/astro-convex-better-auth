@@ -3,6 +3,7 @@ import UserInfo from "../components/UserInfo"
 
 const user = Astro.locals.user!
 const session = Astro.locals.session!
+const isAnonymous = (user as any)?.isAnonymous === true
 ---
 
 <!doctype html>
@@ -14,8 +15,8 @@ const session = Astro.locals.session!
   </head>
   <body>
     <main>
-      <h1>Welcome, {user.name}!</h1>
-      <p>Email: {user.email}</p>
+      <h1>Welcome, {isAnonymous ? "Guest" : user.name}!</h1>
+      {!isAnonymous && <p>Email: {user.email}</p>}
       <p>Session: <code>{session.id}</code></p>
       <nav>
         <a href="/protected">Protected page →</a>

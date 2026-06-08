@@ -85,6 +85,16 @@ test("sign-out redirects to /auth and protects routes", async ({ page }) => {
   await expect(page).toHaveURL("/auth")
 })
 
+test("anonymous sign-in flow", async ({ page }) => {
+  await page.goto("/auth")
+  await page.waitForLoadState("networkidle")
+
+  await page.getByRole("button", { name: "Continue as Guest" }).click()
+
+  await expect(page).toHaveURL("/", { timeout: 10_000 })
+  await expect(page.getByRole("heading", { level: 1 })).toContainText("Guest")
+})
+
 test("logged-in user visiting /auth is redirected to /", async ({ page }) => {
   const user = generateTestUser()
 

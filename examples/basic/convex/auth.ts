@@ -17,6 +17,11 @@ export const createAuth = (ctx: GenericCtx) =>
     // SITE_URL must be set via: npx convex env set SITE_URL http://localhost:4321
     trustedOrigins: [process.env.SITE_URL ?? ""],
     database: authComponent.adapter(ctx),
+    session: {
+      // Override via: npx convex env set SESSION_EXPIRES_IN 30 SESSION_UPDATE_AGE 10
+      expiresIn: parseInt(process.env.SESSION_EXPIRES_IN ?? String(7 * 24 * 60 * 60)),
+      updateAge: parseInt(process.env.SESSION_UPDATE_AGE ?? String(24 * 60 * 60)),
+    },
     emailAndPassword: {
       enabled: true,
     },

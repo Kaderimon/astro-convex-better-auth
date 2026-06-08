@@ -18,6 +18,7 @@ const isAnonymous = (user as any)?.isAnonymous === true
       <h1>Welcome, {isAnonymous ? "Guest" : user.name}!</h1>
       {!isAnonymous && <p>Email: {user.email}</p>}
       <p>Session: <code>{session.id}</code></p>
+      <p>Session expires at: <code data-expires-at={new Date(session.expiresAt).toISOString()}>{new Date(session.expiresAt).toLocaleString()}</code></p>
       <nav>
         <a href="/protected">Protected page →</a>
       </nav>

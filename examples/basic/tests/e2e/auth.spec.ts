@@ -95,6 +95,58 @@ test("anonymous sign-in flow", async ({ page }) => {
   await expect(page.getByRole("heading", { level: 1 })).toContainText("Guest")
 })
 
+test("anonymous session persists when user returns within the expiry window", async ({ page }) => {
+  await page.goto("/auth")
+  await page.waitForLoadState("networkidle")
+  await page.getByRole("button", { name: "Continue as Guest" }).click()
+  await expect(page).toHaveURL("/", { timeout: 10_000 })
+
+  const sessionId = await page.locator("code").first().textContent()
+  expect(sessionId).toBeTruthy()
+
+  // Simulate closing and reopening the tab
+  await page.reload()
+  await page.waitForLoadState("networkidle")
+
+  await expect(page).toHaveURL("/")
+  await expect(page.getByRole("heading", { level: 1 })).toContainText("Guest")
+  const newSessionId = await page.locator("code").first().textContent()
+  expect(newSessionId).toBe(sessionId)
+})
+
+test("anonymous session is lost after SESSION_EXPIRES_IN elapses without activity", async ({ page }) => {
+  test.setTimeout(120_000)
+
+  await page.goto("/auth")
+  await page.waitForLoadState("networkidle")
+  await page.getByRole("button", { name: "Continue as Guest" }).click()
+  await expect(page).toHaveURL("/", { timeout: 10_000 })
+
+  // Read the actual server-side expiry so the wait is precise regardless of
+  // what SESSION_EXPIRES_IN is configured to.
+  const expiresAtIso = await page.locator("[data-expires-at]").getAttribute("data-expires-at")
+  const expiresAt = new Date(expiresAtIso!)
+  const msUntilExpiry = expiresAt.getTime() - Date.now()
+
+  // Skip unless a short SESSION_EXPIRES_IN is configured — otherwise the wait
+  // would be hours. Run: npx convex env set SESSION_EXPIRES_IN 30
+  if (msUntilExpiry > 90_000) {
+    test.skip(true, `Session expires in ${Math.round(msUntilExpiry / 1000)}s — set SESSION_EXPIRES_IN=30 on Convex to run this test`)
+    return
+  }
+
+  // Simulate closing the tab: navigate away so the React useSession() polling
+  // stops and no requests reach the server (no updateAge refresh can occur).
+  await page.goto("about:blank")
+
+  // Wait until the session has expired plus a small buffer
+  await page.waitForTimeout(msUntilExpiry + 3_000)
+
+  // User "comes back" — server-side session is expired → redirect to /auth
+  await page.goto("http://localhost:4321/")
+  await expect(page).toHaveURL("/auth", { timeout: 10_000 })
+})
+
 test("logged-in user visiting /auth is redirected to /", async ({ page }) => {
   const user = generateTestUser()
 

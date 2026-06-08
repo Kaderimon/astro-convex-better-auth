@@ -47,6 +47,26 @@ export default defineConfig({
 })
 ```
 
+**Passing env variables** — `astro.config.*` runs before Astro resolves `.env` files, so use `process.env` or Vite's `loadEnv` instead of `import.meta.env`:
+
+```js
+import { loadEnv } from "vite"
+import convexBetterAuth from "astro-convex-better-auth"
+
+const env = loadEnv(process.env.NODE_ENV, process.cwd(), "")
+
+export default defineConfig({
+  output: "server",
+  adapter: cloudflare(),
+  integrations: [
+    convexBetterAuth({
+      convexUrl: process.env.PUBLIC_CONVEX_URL || env.PUBLIC_CONVEX_URL,
+      siteUrl: process.env.PUBLIC_CONVEX_SITE_URL || env.PUBLIC_CONVEX_SITE_URL,
+    }),
+  ],
+})
+```
+
 **Optional — auto-inject the middleware** so you don't need to create `src/middleware.ts` at all:
 
 ```js

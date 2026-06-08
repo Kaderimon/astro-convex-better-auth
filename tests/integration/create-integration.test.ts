@@ -164,6 +164,52 @@ describe("createIntegration", () => {
       expect(define).not.toHaveProperty("import.meta.env.PUBLIC_CONVEX_SITE_URL")
       expect(define).not.toHaveProperty("import.meta.env.PUBLIC_CONVEX_URL")
     })
+
+    it("injects define when convexUrl is a process.env-style string value", () => {
+      const integration = createIntegration()({ convexUrl: "https://from-env.example.com" })
+      const ctx = makeSetupContext()
+
+      runSetupHook(integration, ctx)
+
+      const { define } = ctx.updateConfig.mock.calls[0][0].vite
+      expect(define).toHaveProperty(
+        "import.meta.env.PUBLIC_CONVEX_URL",
+        JSON.stringify("https://from-env.example.com"),
+      )
+    })
+
+    it("injects define when siteUrl is a process.env-style string value", () => {
+      const integration = createIntegration()({ siteUrl: "https://from-env.site.example.com" })
+      const ctx = makeSetupContext()
+
+      runSetupHook(integration, ctx)
+
+      const { define } = ctx.updateConfig.mock.calls[0][0].vite
+      expect(define).toHaveProperty(
+        "import.meta.env.PUBLIC_CONVEX_SITE_URL",
+        JSON.stringify("https://from-env.site.example.com"),
+      )
+    })
+
+    it("omits define when convexUrl is undefined (env var not set in process.env)", () => {
+      const integration = createIntegration()({ convexUrl: undefined })
+      const ctx = makeSetupContext()
+
+      runSetupHook(integration, ctx)
+
+      const { define } = ctx.updateConfig.mock.calls[0][0].vite
+      expect(define).not.toHaveProperty("import.meta.env.PUBLIC_CONVEX_URL")
+    })
+
+    it("omits define when siteUrl is undefined (env var not set in process.env)", () => {
+      const integration = createIntegration()({ siteUrl: undefined })
+      const ctx = makeSetupContext()
+
+      runSetupHook(integration, ctx)
+
+      const { define } = ctx.updateConfig.mock.calls[0][0].vite
+      expect(define).not.toHaveProperty("import.meta.env.PUBLIC_CONVEX_SITE_URL")
+    })
   })
 
   describe("env schema (createEnvSchema)", () => {

@@ -1,0 +1,27 @@
+---
+import UserInfo from "../components/UserInfo"
+
+const user = Astro.locals.user!
+const session = Astro.locals.session!
+---
+
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Home — astro-convex-better-auth example</title>
+  </head>
+  <body>
+    <main>
+      <h1>Welcome, {user.name}!</h1>
+      <p>Email: {user.email}</p>
+      <p>Session: <code>{session.id}</code></p>
+      <nav>
+        <a href="/protected">Protected page →</a>
+      </nav>
+      <hr />
+      <UserInfo client:load />
+    </main>
+  </body>
+</html>

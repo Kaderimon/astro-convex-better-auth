@@ -31,7 +31,9 @@
     "prepare": "tsdown",
     "test": "vitest run",
     "test:watch": "vitest",
-    "test:coverage": "vitest run --coverage"
+    "test:coverage": "vitest run --coverage",
+    "example:dev": "pnpm --filter examples-basic dev",
+    "example:build": "pnpm build && pnpm --filter examples-basic build"
   },
   "keywords": [
     "auth",
@@ -63,5 +65,10 @@
     "astro": "^6.4.4",
     "better-auth": "^1.6.14",
     "convex": ">=1.0.0"
+  },
+  "pnpm": {
+    "overrides": {
+      "kysely": "0.28.17"
+    }
   }
 }

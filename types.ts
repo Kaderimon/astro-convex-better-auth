@@ -29,9 +29,10 @@ export type ConvexBetterAuthMiddlewareOptions = {
    * a new session for the stored anonymous user, then populates `context.locals`
    * for the current request without a redirect.
    *
-   * Requires `restoreAnonymousPlugin()` (from `astro-convex-better-auth/plugins`)
-   * to be registered in your Convex auth config. The pre-configured `authClient`
-   * sets the cookie automatically after anonymous sign-in.
+   * Requires `restoreAnonymousSessionPlugin()` (from `astro-convex-better-auth/plugins`)
+   * to be registered in your Convex auth config. An auth client with
+   * `restoreAnonymousSessionClient()` registered sets the cookie automatically
+   * after anonymous sign-in.
    */
   restoreAnonymousSessions?: boolean
 }

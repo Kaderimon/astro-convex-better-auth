@@ -19,13 +19,13 @@ export function readDocumentCookie(name: string): string | null {
 
 /**
  * Persists the signed anonymous restore token (the `restoreToken` field that
- * `restoreAnonymousPlugin` adds to the `/sign-in/anonymous` response) as a
- * long-lived browser cookie so that
+ * `restoreAnonymousSessionPlugin` adds to the `/sign-in/anonymous` response)
+ * as a long-lived browser cookie so that
  * `convexBetterAuthMiddleware({ restoreAnonymousSessions: true })` can
  * transparently restore the session after it expires.
  *
- * The pre-configured `authClient` calls this automatically after anonymous
- * sign-in; only call it yourself if you build a custom auth client.
+ * `restoreAnonymousSessionClient()` calls this automatically after anonymous
+ * sign-in; only call it yourself if you handle the sign-in response manually.
  */
 export function setAnonIdentityCookie(restoreToken: string): void {
   document.cookie = `${ANON_IDENTITY_COOKIE}=${encodeURIComponent(restoreToken)}; Path=/; SameSite=Lax; Max-Age=31536000`

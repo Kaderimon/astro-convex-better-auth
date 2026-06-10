@@ -21,19 +21,19 @@ import { RESTORE_ANONYMOUS_SESSION_PATH } from "../shared/constants"
  * Register this alongside the `anonymous()` plugin in your Convex auth config:
  *
  * ```ts
- * import { restoreAnonymousPlugin } from "astro-convex-better-auth/plugins"
+ * import { restoreAnonymousSessionPlugin } from "astro-convex-better-auth/plugins"
  *
  * betterAuth({
- *   plugins: [convex({ authConfig }), anonymous(), restoreAnonymousPlugin()],
+ *   plugins: [convex({ authConfig }), anonymous(), restoreAnonymousSessionPlugin()],
  * })
  * ```
  *
- * Pair with `restoreAnonymousSessions: true` in `convexBetterAuthMiddleware()`.
- * The pre-configured auth client stores the token in the `anon_identity`
- * cookie automatically after anonymous sign-in.
+ * Pair with `restoreAnonymousSessions: true` in `convexBetterAuthMiddleware()`
+ * and `restoreAnonymousSessionClient()` in the auth client, which stores the
+ * token in the `anon_identity` cookie after anonymous sign-in.
  */
-export const restoreAnonymousPlugin = () => ({
-  id: "restore-anonymous",
+export const restoreAnonymousSessionPlugin = () => ({
+  id: "restore-anonymous-session",
   hooks: {
     after: [
       {

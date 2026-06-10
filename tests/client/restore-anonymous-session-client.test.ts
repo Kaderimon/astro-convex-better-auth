@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
-import { astroConvexClient } from "../../client/plugin"
+import { restoreAnonymousSessionClient } from "../../client/restore-anonymous-session-client"
 
 const STORED_TOKEN_KEY = "__Secure-better-auth.session_token"
 
@@ -11,17 +11,14 @@ function clearDocumentCookies() {
   }
 }
 
-function getFetchPlugin(options?: { restoreAnonymousSessions?: boolean }) {
-  return astroConvexClient(options).fetchPlugins![0]
+function getFetchPlugin() {
+  return restoreAnonymousSessionClient().fetchPlugins![0]
 }
 
 // Wires the plugin's getActions with a mock $fetch so the client-side
 // restore path can be exercised; returns the recorded restore calls.
-function getPluginWithAuthFetch(
-  options?: { restoreAnonymousSessions?: boolean },
-  error: { status: number } | null = null,
-) {
-  const plugin = astroConvexClient(options)
+function getPluginWithAuthFetch(error: { status: number } | null = null) {
+  const plugin = restoreAnonymousSessionClient()
   const calls: Array<{ path: string; body: Record<string, string> }> = []
   const mockFetch = (path: string, opts: { body: Record<string, string> }) => {
     calls.push({ path, body: opts.body })
@@ -47,7 +44,7 @@ const SIGN_IN_URL = "https://example.convex.site/api/auth/sign-in/anonymous"
 const SIGN_OUT_URL = "https://example.convex.site/api/auth/sign-out"
 const GET_SESSION_URL = "https://example.convex.site/api/auth/get-session"
 
-describe("astroConvexClient", () => {
+describe("restoreAnonymousSessionClient", () => {
   beforeEach(() => {
     vi.useFakeTimers()
     localStorage.clear()
@@ -60,38 +57,9 @@ describe("astroConvexClient", () => {
     clearDocumentCookies()
   })
 
-  describe("flag off (default)", () => {
-    it("does not set the anon_identity cookie on anonymous sign-in", async () => {
-      const plugin = getFetchPlugin()
-
-      await plugin.hooks!.onSuccess!(
-        makeSuccessContext(SIGN_IN_URL, {
-          user: { id: "u1" },
-          restoreToken: "u1.sig",
-        }) as never,
-      )
-
-      expect(document.cookie).not.toContain("anon_identity")
-    })
-
-    it("does not call the restore endpoint when get-session returns null", async () => {
-      document.cookie = "anon_identity=u1.sig; Path=/"
-      const { fetchPlugin, calls } = getPluginWithAuthFetch()
-
-      await fetchPlugin.hooks!.onSuccess!(
-        makeSuccessContext(GET_SESSION_URL, null) as never,
-      )
-      await flushAsync()
-
-      expect(calls).toEqual([])
-    })
-  })
-
-  describe("flag on", () => {
-    const enabled = { restoreAnonymousSessions: true }
-
+  describe("anon_identity cookie lifecycle", () => {
     it("sets the anon_identity cookie from restoreToken on anonymous sign-in", async () => {
-      const plugin = getFetchPlugin(enabled)
+      const plugin = getFetchPlugin()
 
       await plugin.hooks!.onSuccess!(
         makeSuccessContext(SIGN_IN_URL, {
@@ -103,9 +71,19 @@ describe("astroConvexClient", () => {
       expect(document.cookie).toContain("anon_identity=u1.sig")
     })
 
+    it("does not set the cookie when the response has no restoreToken (backend plugin missing)", async () => {
+      const plugin = getFetchPlugin()
+
+      await plugin.hooks!.onSuccess!(
+        makeSuccessContext(SIGN_IN_URL, { user: { id: "u1" } }) as never,
+      )
+
+      expect(document.cookie).not.toContain("anon_identity")
+    })
+
     it("clears the anon_identity cookie on sign-out", async () => {
       document.cookie = "anon_identity=u1.sig; Path=/"
-      const plugin = getFetchPlugin(enabled)
+      const plugin = getFetchPlugin()
 
       await plugin.hooks!.onSuccess!(
         makeSuccessContext(SIGN_OUT_URL, {}) as never,
@@ -116,11 +94,9 @@ describe("astroConvexClient", () => {
   })
 
   describe("client-side restore on expired session", () => {
-    const enabled = { restoreAnonymousSessions: true }
-
     it("calls the restore endpoint when get-session is null and anon_identity exists", async () => {
       document.cookie = `anon_identity=${encodeURIComponent("u1.sig+/=")}; Path=/`
-      const { fetchPlugin, calls } = getPluginWithAuthFetch(enabled)
+      const { fetchPlugin, calls } = getPluginWithAuthFetch()
 
       await fetchPlugin.hooks!.onSuccess!(
         makeSuccessContext(GET_SESSION_URL, null) as never,
@@ -133,7 +109,7 @@ describe("astroConvexClient", () => {
     })
 
     it("does not call the restore endpoint without an anon_identity cookie", async () => {
-      const { fetchPlugin, calls } = getPluginWithAuthFetch(enabled)
+      const { fetchPlugin, calls } = getPluginWithAuthFetch()
 
       await fetchPlugin.hooks!.onSuccess!(
         makeSuccessContext(GET_SESSION_URL, null) as never,
@@ -148,7 +124,7 @@ describe("astroConvexClient", () => {
       // nothing to restore.
       document.cookie = "anon_identity=u1.sig; Path=/"
       document.cookie = "better-auth.session_token=alive; Path=/"
-      const { fetchPlugin, calls } = getPluginWithAuthFetch(enabled)
+      const { fetchPlugin, calls } = getPluginWithAuthFetch()
 
       await fetchPlugin.hooks!.onSuccess!(
         makeSuccessContext(GET_SESSION_URL, null, {
@@ -162,7 +138,7 @@ describe("astroConvexClient", () => {
 
     it("ignores stale null get-session responses that raced a successful restore", async () => {
       document.cookie = "anon_identity=u1.sig; Path=/"
-      const { fetchPlugin, calls } = getPluginWithAuthFetch(enabled)
+      const { fetchPlugin, calls } = getPluginWithAuthFetch()
 
       // First null triggers the restore, which succeeds.
       await fetchPlugin.hooks!.onSuccess!(
@@ -188,7 +164,7 @@ describe("astroConvexClient", () => {
 
     it("rate-limits restore attempts and retries once the window elapses", async () => {
       document.cookie = "anon_identity=u1.sig; Path=/"
-      const { fetchPlugin, calls } = getPluginWithAuthFetch(enabled, { status: 503 })
+      const { fetchPlugin, calls } = getPluginWithAuthFetch({ status: 503 })
 
       await fetchPlugin.hooks!.onSuccess!(
         makeSuccessContext(GET_SESSION_URL, null) as never,
@@ -210,7 +186,7 @@ describe("astroConvexClient", () => {
 
     it("cancels a scheduled retry on sign-out", async () => {
       document.cookie = "anon_identity=u1.sig; Path=/"
-      const { fetchPlugin, calls } = getPluginWithAuthFetch(enabled, { status: 503 })
+      const { fetchPlugin, calls } = getPluginWithAuthFetch({ status: 503 })
 
       await fetchPlugin.hooks!.onSuccess!(
         makeSuccessContext(GET_SESSION_URL, null) as never,
@@ -232,7 +208,7 @@ describe("astroConvexClient", () => {
 
     it("clears the anon_identity cookie when the backend rejects the token", async () => {
       document.cookie = "anon_identity=u1.badsig; Path=/"
-      const { fetchPlugin } = getPluginWithAuthFetch(enabled, { status: 401 })
+      const { fetchPlugin } = getPluginWithAuthFetch({ status: 401 })
 
       await fetchPlugin.hooks!.onSuccess!(
         makeSuccessContext(GET_SESSION_URL, null) as never,
@@ -244,7 +220,7 @@ describe("astroConvexClient", () => {
 
     it("keeps the anon_identity cookie on transient restore failures (5xx)", async () => {
       document.cookie = "anon_identity=u1.sig; Path=/"
-      const { fetchPlugin } = getPluginWithAuthFetch(enabled, { status: 503 })
+      const { fetchPlugin } = getPluginWithAuthFetch({ status: 503 })
 
       await fetchPlugin.hooks!.onSuccess!(
         makeSuccessContext(GET_SESSION_URL, null) as never,

@@ -4,7 +4,8 @@ A thin Astro integration that wires [`@convex-dev/better-auth`](https://github.c
 
 - An **Astro integration** that injects env variables and a virtual config module
 - An **SSR middleware** that validates sessions on every request and populates `Astro.locals`
-- A pre-configured **auth client** for client-side sign-in/sign-up
+- **Client building blocks** for your better-auth client: `cookieJarStorage` (browser cookie jar as the single session store shared with SSR) and `restoreAnonymousSessionClient`
+- A **better-auth server plugin** (`restoreAnonymousSessionPlugin`) that lets expired anonymous sessions be restored transparently
 
 ---
 
@@ -138,13 +139,39 @@ const isAnonymous = (user as any)?.isAnonymous === true
 ---
 ```
 
-### Client-side auth client
+### Create your auth client
 
-Import the pre-configured auth client wherever you need auth on the client:
+Compose your own better-auth client with this library's building blocks — e.g. in `src/lib/auth-client.ts`:
 
 ```ts
-import authClient from "astro-convex-better-auth/client"
+import { createAuthClient } from "better-auth/react"
+import { convexClient, crossDomainClient } from "@convex-dev/better-auth/client/plugins"
+import { anonymousClient } from "better-auth/client/plugins"
+import type { AuthClient } from "@convex-dev/better-auth/react"
+import { cookieJarStorage, restoreAnonymousSessionClient } from "astro-convex-better-auth/client"
+
+const client = createAuthClient({
+  baseURL: import.meta.env.PUBLIC_CONVEX_SITE_URL,
+  plugins: [
+    convexClient(),
+    // cookieJarStorage makes the browser cookie jar the single session store
+    // shared with the Astro SSR middleware.
+    crossDomainClient({ storage: cookieJarStorage }),
+    anonymousClient(),
+    // Optional, for anonymous session restoration.
+    // Must come after crossDomainClient() — see below.
+    restoreAnonymousSessionClient(),
+  ],
+})
+
+// Intersect with AuthClient so Convex helpers type-check without losing
+// plugin-inferred methods such as `signIn.anonymous`.
+const authClient = client as typeof client & AuthClient
+
+export default authClient
 ```
+
+**Plugin order matters**: `restoreAnonymousSessionClient()` must come *after* `crossDomainClient()` in the plugins array — better-fetch runs plugin hooks in array order, and it inspects the cookie jar expecting `crossDomainClient` to have already applied the response's cookie changes.
 
 ### Client-side usage (React components)
 
@@ -162,16 +189,21 @@ await authClient.signIn.anonymous()
 await authClient.signUp.email({ name, email, password, callbackURL: "/" })
 ```
 
-> The Convex auth server (`xxx.convex.site`) is on a different origin from your Astro app, so the browser's cross-origin cookie rules block `Set-Cookie` responses from landing in your app's cookie jar. The pre-configured `authClient` includes the `crossDomainClient()` plugin backed by this library's `cookieJarStorage` adapter, which persists the auth cookies it receives directly into `document.cookie` on your app's origin. The browser cookie jar is the single session store shared by client-side requests and the SSR middleware — no sync step or manual cookie calls are needed.
+> The Convex auth server (`xxx.convex.site`) is on a different origin from your Astro app, so the browser's cross-origin cookie rules block `Set-Cookie` responses from landing in your app's cookie jar. The `crossDomainClient()` plugin backed by this library's `cookieJarStorage` adapter persists the auth cookies it receives directly into `document.cookie` on your app's origin. The browser cookie jar is the single session store shared by client-side requests and the SSR middleware — no sync step or manual cookie calls are needed.
 
 ### Wrapping Convex-authenticated components
 
-Use `ConvexBetterAuthProvider` from `@convex-dev/better-auth/react` to gate UI behind a valid Convex session:
+Use `ConvexBetterAuthProvider` from `@convex-dev/better-auth/react` to gate UI behind a valid Convex session. Construct the `ConvexReactClient` yourself:
 
 ```tsx
-import authClient, { convexClient } from "astro-convex-better-auth/client"
+import { ConvexReactClient } from "convex/react"
 import { ConvexBetterAuthProvider } from "@convex-dev/better-auth/react"
 import { Authenticated } from "convex/react"
+import authClient from "./lib/auth-client"
+
+const convexClient = new ConvexReactClient(import.meta.env.PUBLIC_CONVEX_URL, {
+  expectAuth: true, // optional: pause queries until the user is authenticated
+})
 
 ;<ConvexBetterAuthProvider client={convexClient} authClient={authClient}>
   <Authenticated>{/* rendered only when authenticated */}</Authenticated>
@@ -193,8 +225,11 @@ const initialToken = Astro.locals.convexToken
 
 ```tsx
 // MyReactIsland.tsx
-import authClient, { convexClient } from "astro-convex-better-auth/client"
+import { ConvexReactClient } from "convex/react"
 import { ConvexBetterAuthProvider } from "@convex-dev/better-auth/react"
+import authClient from "../lib/auth-client"
+
+const convexClient = new ConvexReactClient(import.meta.env.PUBLIC_CONVEX_URL)
 
 export default function MyReactIsland({ initialToken }: { initialToken?: string | null }) {
   return (
@@ -221,11 +256,12 @@ This library ships a built-in mechanism to restore anonymous sessions transparen
 
 ### How it works
 
-1. `restoreAnonymousPlugin()` adds a signed `restoreToken` (`<userId>.<hmac>`, signed with your better-auth secret) to the `/sign-in/anonymous` response. The pre-configured `authClient` automatically writes it into a long-lived browser cookie (`anon_identity`, 1-year `Max-Age`).
-2. Enable `restoreAnonymousSessions: true` in `convexBetterAuthMiddleware`. When no session cookie is found but `anon_identity` is present, the middleware calls the plugin's restore endpoint, which verifies the token's signature and creates a new session for the stored user. The middleware then populates `context.locals` and sets a fresh session cookie — all before any route guard runs.
-3. Register `restoreAnonymousPlugin()` in your Convex auth config to expose the restore endpoint.
-4. Because the auth client reads its session store straight from the browser cookie jar (`cookieJarStorage`), the cookie the middleware sets is immediately visible client-side — `useSession()` sees the restored session on its next fetch with no sync step, reload, or re-login.
-5. If the session expires while the page is open (`get-session` starts returning null), the auth client drops the dead session cookie and the plugin calls the restore endpoint itself (rate-limited), so `useSession()` recovers in place without a reload.
+Three pieces work together: `restoreAnonymousSessionPlugin()` on the Convex backend, `restoreAnonymousSessions: true` in the Astro middleware, and `restoreAnonymousSessionClient()` in your auth client.
+
+1. `restoreAnonymousSessionPlugin()` adds a signed `restoreToken` (`<userId>.<hmac>`, signed with your better-auth secret) to the `/sign-in/anonymous` response, and exposes the restore endpoint that turns a valid token back into a session. `restoreAnonymousSessionClient()` writes the token into a long-lived browser cookie (`anon_identity`, 1-year `Max-Age`) and clears it on sign-out.
+2. With `restoreAnonymousSessions: true` in `convexBetterAuthMiddleware`, when no session cookie is found but `anon_identity` is present, the middleware calls the restore endpoint, which verifies the token's signature and creates a new session for the stored user. The middleware then populates `context.locals` and sets a fresh session cookie — all before any route guard runs.
+3. Because the auth client reads its session store straight from the browser cookie jar (`cookieJarStorage`), the cookie the middleware sets is immediately visible client-side — `useSession()` sees the restored session on its next fetch with no sync step, reload, or re-login.
+4. If the session expires while the page is open (`get-session` starts returning null), the auth client drops the dead session cookie and `restoreAnonymousSessionClient()` calls the restore endpoint itself (rate-limited), so `useSession()` recovers in place without a reload.
 
 Because the token is HMAC-signed server-side, knowing an anonymous user's ID is not enough to take over their account — only a client that received the original sign-in response can restore the session.
 
@@ -234,14 +270,14 @@ Because the token is HMAC-signed server-side, knowing an anonymous user's ID is 
 **1. Convex backend — `convex/auth.ts`**
 
 ```ts
-import { restoreAnonymousPlugin } from "astro-convex-better-auth/plugins"
+import { restoreAnonymousSessionPlugin } from "astro-convex-better-auth/plugins"
 import { anonymous } from "better-auth/plugins"
 
 betterAuth({
   plugins: [
     convex({ authConfig }),
     anonymous(),
-    restoreAnonymousPlugin(), // exposes POST /api/auth/restore-anonymous-session
+    restoreAnonymousSessionPlugin(), // exposes POST /api/auth/restore-anonymous-session
   ],
 })
 ```
@@ -252,18 +288,16 @@ betterAuth({
 convexBetterAuthMiddleware({ restoreAnonymousSessions: true })
 ```
 
-**3. Client — sign in anonymously**
+**3. Auth client — register the client plugin**
+
+Add `restoreAnonymousSessionClient()` to your auth client's plugins, *after* `crossDomainClient()` (see [Create your auth client](#create-your-auth-client)). Registering the plugin is the opt-in — it takes no options and stays inert unless the backend plugin is registered too.
+
+**4. Sign in / sign out**
 
 ```ts
 await authClient.signIn.anonymous()
 // the anon_identity cookie is set and cookies are synced automatically
-```
 
-> If you build a **custom auth client** instead of using the pre-configured one, pass `crossDomainClient({ storage: cookieJarStorage })` (exported from `astro-convex-better-auth/client`) and `astroConvexClient({ restoreAnonymousSessions: true })` (default is `false`, symmetric with the middleware option). **Plugin order matters**: `astroConvexClient()` must come *after* `crossDomainClient()` in the plugins array — better-fetch runs plugin hooks in array order, and `astroConvexClient` inspects the cookie jar expecting `crossDomainClient` to have already applied the response's cookie changes.
-
-**4. Client — sign out**
-
-```ts
 await authClient.signOut()
 // the anon_identity cookie is cleared automatically
 ```

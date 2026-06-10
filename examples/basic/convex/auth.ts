@@ -2,7 +2,7 @@ import { betterAuth } from "better-auth"
 import { createClient } from "@convex-dev/better-auth"
 import { convex, crossDomain } from "@convex-dev/better-auth/plugins"
 import { anonymous } from "better-auth/plugins"
-import { restoreAnonymousPlugin } from "astro-convex-better-auth/plugins"
+import { restoreAnonymousSessionPlugin } from "astro-convex-better-auth/plugins"
 import { components } from "./_generated/api"
 import authConfig from "./auth.config"
 import type { GenericCtx } from "@convex-dev/better-auth"
@@ -30,6 +30,6 @@ export const createAuth = (ctx: GenericCtx) =>
       convex({ authConfig }),
       crossDomain({ siteUrl: process.env.SITE_URL! }),
       anonymous(),
-      restoreAnonymousPlugin(),
+      restoreAnonymousSessionPlugin(),
     ],
   })

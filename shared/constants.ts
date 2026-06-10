@@ -6,7 +6,7 @@
 export const ANON_IDENTITY_COOKIE = "anon_identity"
 
 /**
- * Endpoint path registered by `restoreAnonymousPlugin`, relative to
+ * Endpoint path registered by `restoreAnonymousSessionPlugin`, relative to
  * better-auth's base path (`/api/auth`).
  */
 export const RESTORE_ANONYMOUS_SESSION_PATH = "/restore-anonymous-session"

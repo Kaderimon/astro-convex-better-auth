@@ -1,5 +1,5 @@
 import { useState } from "react"
-import authClient from "astro-convex-better-auth/client"
+import authClient from "../lib/auth-client"
 
 type Mode = "signin" | "signup"
 

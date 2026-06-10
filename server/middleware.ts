@@ -64,7 +64,7 @@ function fetchSession(
 type RestoredSession = { user: User; session: Session; sessionToken: string }
 
 /**
- * Calls the `restoreAnonymousPlugin` endpoint to mint a fresh session for a
+ * Calls the `restoreAnonymousSessionPlugin` endpoint to mint a fresh session for a
  * signed restore token. Clears the stale `anon_identity` cookie when the
  * backend rejects the token (invalid signature, user deleted, not anonymous);
  * keeps it on network errors so restoration can be retried.

@@ -1,4 +1,4 @@
-import authClient from "astro-convex-better-auth/client"
+import authClient from "../lib/auth-client"
 
 export default function UserInfo() {
   const { data: session, isPending } = authClient.useSession()

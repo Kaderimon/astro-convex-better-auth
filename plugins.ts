@@ -1,1 +1,1 @@
-export { restoreAnonymousPlugin } from "./server/restore-anonymous-plugin"
+export { restoreAnonymousSessionPlugin } from "./server/restore-anonymous-session-plugin"

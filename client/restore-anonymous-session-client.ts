@@ -49,42 +49,31 @@ function sentSessionToken(request: { headers?: unknown }): string | null {
   )
 }
 
-export type AstroConvexClientOptions = {
-  /**
-   * Enables client-side support for anonymous session restoration, symmetric
-   * with the middleware option of the same name:
-   *
-   * - stores the signed `restoreToken` from `/sign-in/anonymous` responses in
-   *   the `anon_identity` cookie (and clears it on sign-out),
-   * - when a session expires (`get-session` returns null), calls the restore
-   *   endpoint so `useSession()` recovers in place without a reload.
-   *
-   * The pre-configured `authClient` enables this; it stays inert unless
-   * `restoreAnonymousPlugin()` is registered on the Convex backend and
-   * `restoreAnonymousSessions: true` is set in the middleware.
-   *
-   * @default false
-   */
-  restoreAnonymousSessions?: boolean
-}
-
 /**
- * Client plugin for anonymous session restoration. Register it *after*
- * `crossDomainClient()` (the pre-configured `authClient` already does):
- * better-fetch runs plugin hooks in array order, and this plugin's `onSuccess`
- * inspects the cookie jar expecting `crossDomainClient` to have already
- * applied the response's cookie changes through `cookieJarStorage`.
+ * Client plugin for anonymous session restoration, the client-side counterpart
+ * of `restoreAnonymousSessionPlugin` (Convex backend) and
+ * `convexBetterAuthMiddleware({ restoreAnonymousSessions: true })` (Astro):
+ *
+ * - stores the signed `restoreToken` from `/sign-in/anonymous` responses in
+ *   the `anon_identity` cookie (and clears it on sign-out),
+ * - when a session expires (`get-session` returns null), calls the restore
+ *   endpoint so `useSession()` recovers in place without a reload.
+ *
+ * Registering the plugin is the opt-in; it stays inert unless
+ * `restoreAnonymousSessionPlugin()` is registered on the Convex backend
+ * (without it, no `restoreToken` ever arrives).
+ *
+ * Register it *after* `crossDomainClient()`: better-fetch runs plugin hooks in
+ * array order, and this plugin's `onSuccess` inspects the cookie jar expecting
+ * `crossDomainClient` to have already applied the response's cookie changes
+ * through `cookieJarStorage`.
  *
  * Restoring goes through the auth client's own fetch pipeline, so
  * `crossDomainClient` attaches the `Better-Auth-Cookie` header, persists the
  * fresh session cookie from the response, and notifies `$sessionSignal` so
  * `useSession()` refetches — no manual store writes needed.
  */
-export function astroConvexClient(
-  options: AstroConvexClientOptions = {},
-): BetterAuthClientPlugin {
-  const { restoreAnonymousSessions = false } = options
-
+export function restoreAnonymousSessionClient(): BetterAuthClientPlugin {
   // Captured in getActions.
   let authFetch: AuthFetch | null = null
   let restoreInFlight = false
@@ -132,18 +121,18 @@ export function astroConvexClient(
   }
 
   return {
-    id: "astro-convex",
+    id: "restore-anonymous-session",
     getActions: ($fetch) => {
       authFetch = $fetch as unknown as AuthFetch
       return {}
     },
     fetchPlugins: [
       {
-        id: "astro-convex-restore",
-        name: "Astro Convex anonymous session restore",
+        id: "restore-anonymous-session-fetch",
+        name: "Anonymous session restore",
         hooks: {
           onSuccess({ data, request }) {
-            if (typeof document === "undefined" || !restoreAnonymousSessions) {
+            if (typeof document === "undefined") {
               return
             }
             const url = request.url.toString()

@@ -232,6 +232,99 @@ describe("convexBetterAuthMiddleware", () => {
     })
   })
 
+  describe("refreshed session cookie propagation", () => {
+    const sessionData = { user: { id: "u1" }, session: { id: "s1" } }
+
+    function setupFetchWithSetCookie(
+      setCookie: string | null,
+      body: unknown = sessionData,
+    ) {
+      const headers = new Headers({ "Content-Type": "application/json" })
+      if (setCookie !== null) {
+        headers.set("Set-Better-Auth-Cookie", setCookie)
+      }
+      vi.stubGlobal(
+        "fetch",
+        vi.fn().mockResolvedValue(
+          new Response(JSON.stringify(body), { status: 200, headers }),
+        ),
+      )
+    }
+
+    it("re-sets a refreshed session_token cookie with the new maxAge", async () => {
+      setupFetchWithSetCookie(
+        "__Secure-better-auth.session_token=newtok; Max-Age=604800; Path=/; HttpOnly; Secure; SameSite=None",
+      )
+      const mw = convexBetterAuthMiddleware()
+      const ctx = makeContext("/dashboard", "better-auth.session_token=oldtok")
+
+      await mw(ctx as never, mockNext)
+
+      expect(ctx.cookies.set).toHaveBeenCalledWith(
+        "better-auth.session_token",
+        "newtok",
+        expect.objectContaining({ path: "/", sameSite: "lax", maxAge: 604800 }),
+      )
+    })
+
+    it("propagates only forwarded cookie names", async () => {
+      setupFetchWithSetCookie(
+        [
+          "__Secure-better-auth.session_token=newtok; Max-Age=600; Path=/",
+          "__Secure-better-auth.convex_jwt=newjwt; Max-Age=600; Path=/",
+          "__Secure-better-auth.session_data=cache; Max-Age=600; Path=/",
+        ].join(", "),
+      )
+      const mw = convexBetterAuthMiddleware()
+      const ctx = makeContext("/dashboard", "better-auth.session_token=oldtok")
+
+      await mw(ctx as never, mockNext)
+
+      const setNames = ctx.cookies.set.mock.calls.map((call) => call[0])
+      expect(setNames).toContain("better-auth.session_token")
+      expect(setNames).toContain("better-auth.convex_jwt")
+      expect(setNames).not.toContain("better-auth.session_data")
+    })
+
+    it("derives maxAge from Expires when Max-Age is absent", async () => {
+      const expires = new Date(Date.now() + 120_000).toUTCString()
+      setupFetchWithSetCookie(
+        `__Secure-better-auth.session_token=newtok; Expires=${expires}; Path=/`,
+      )
+      const mw = convexBetterAuthMiddleware()
+      const ctx = makeContext("/dashboard", "better-auth.session_token=oldtok")
+
+      await mw(ctx as never, mockNext)
+
+      const { maxAge } = ctx.cookies.set.mock.calls[0][2]
+      expect(maxAge).toBeGreaterThan(0)
+      expect(maxAge).toBeLessThanOrEqual(120)
+    })
+
+    it("does not touch cookies when no Set-Better-Auth-Cookie header is present", async () => {
+      setupFetchWithSetCookie(null)
+      const mw = convexBetterAuthMiddleware()
+      const ctx = makeContext("/dashboard", "better-auth.session_token=oldtok")
+
+      await mw(ctx as never, mockNext)
+
+      expect(ctx.cookies.set).not.toHaveBeenCalled()
+    })
+
+    it("does not propagate cookies when get-session returns no session", async () => {
+      setupFetchWithSetCookie(
+        "__Secure-better-auth.session_token=; Max-Age=0; Path=/",
+        null,
+      )
+      const mw = convexBetterAuthMiddleware()
+      const ctx = makeContext("/dashboard", "better-auth.session_token=oldtok")
+
+      await mw(ctx as never, mockNext)
+
+      expect(ctx.cookies.set).not.toHaveBeenCalled()
+    })
+  })
+
   describe("failed get-session", () => {
     it("sets user=null and session=null when get-session returns non-ok response", async () => {
       vi.stubGlobal(

@@ -103,14 +103,17 @@ Playwright must be able to reach the running dev server (`http://localhost:4321`
 - Anonymous (guest) sign-in
 - Anonymous session persistence across reloads within the expiry window
 - Anonymous session loss after expiry (the gap `examples/anonymous-restore` fills)
+- Anonymous session keepalive while the tab stays open (`refetchInterval` polling)
 - Redirect away from `/auth` when already signed in
 
-The expiry test self-skips unless the Convex deployment uses a short session lifetime. To exercise it:
+The expiry and keepalive tests self-skip unless the Convex deployment uses a short session lifetime. To exercise them:
 
 ```bash
 pnpm dlx convex env set SESSION_EXPIRES_IN 30
 pnpm dlx convex env set SESSION_UPDATE_AGE 10
 ```
+
+and set `SESSION_UPDATE_AGE=10` in this example's `.env.local` so the client polls at the same cadence.
 
 ## How it works
 
@@ -121,6 +124,6 @@ Browser → /api/auth/* ──────────────────�
 
 `convexBetterAuthMiddleware` calls `/api/auth/get-session` on every non-auth request, populates `Astro.locals.user` and `Astro.locals.session`, and strips/re-adds `__Secure-` cookie prefixes so Better Auth's CSRF checks pass across domains.
 
-The auth client (`src/lib/auth-client.ts`) stores the cross-domain auth cookies directly in `document.cookie` (via the `cookieJarStorage` adapter), so the next SSR request's middleware reads the same session the client holds — no sync step needed.
+The auth client (`src/lib/auth-client.ts`) stores the cross-domain auth cookies directly in `document.cookie` (via the `cookieJarStorage` adapter), so the next SSR request's middleware reads the same session the client holds — no sync step needed. It also polls `get-session` every `SESSION_UPDATE_AGE` seconds (`sessionOptions.refetchInterval`), so a tab left open triggers better-auth's sliding refresh and the session never expires under the user.
 
 Anonymous sign-in (`authClient.signIn.anonymous()`) creates a real user with `isAnonymous: true` and a normal session cookie, so guests pass the same middleware checks as registered users. While the cookie is valid the guest keeps their identity across visits; once the session expires there is no way to recover it (that's what the `restoreAnonymousSession*` plugins in `examples/anonymous-restore` add).

@@ -138,8 +138,9 @@ test("anonymous session is restored by middleware after SESSION_EXPIRES_IN elaps
     return
   }
 
-  // Simulate closing the tab: navigate away so the React useSession() polling
-  // stops and no requests reach the server (no updateAge refresh can occur).
+  // Simulate closing the tab: navigate away so the client's refetchInterval
+  // polling stops and no requests reach the server (no updateAge refresh can
+  // occur).
   await page.goto("about:blank")
   await page.waitForTimeout(msUntilExpiry + 3_000)
 

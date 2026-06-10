@@ -135,8 +135,9 @@ test("anonymous session is gone after SESSION_EXPIRES_IN elapses (no restore in 
     return
   }
 
-  // Simulate closing the tab: navigate away so the React useSession() polling
-  // stops and no requests reach the server (no updateAge refresh can occur).
+  // Simulate closing the tab: navigate away so the client's refetchInterval
+  // polling stops and no requests reach the server (no updateAge refresh can
+  // occur).
   await page.goto("about:blank")
   await page.waitForTimeout(msUntilExpiry + 3_000)
 
@@ -145,6 +146,37 @@ test("anonymous session is gone after SESSION_EXPIRES_IN elapses (no restore in 
   // anonymous-restore example fills.
   await page.goto("http://localhost:4321/")
   await expect(page).toHaveURL("/auth", { timeout: 10_000 })
+})
+
+test("anonymous session stays alive while the tab remains open (refetchInterval keepalive)", async ({ page }) => {
+  test.setTimeout(120_000)
+
+  await page.goto("/auth")
+  await page.waitForLoadState("networkidle")
+  await page.getByRole("button", { name: "Continue as Guest" }).click()
+  await expect(page).toHaveURL("/", { timeout: 10_000 })
+
+  const expiresAtIso = await page.locator("[data-expires-at]").getAttribute("data-expires-at")
+  const expiresAt = new Date(expiresAtIso!)
+  const msUntilExpiry = expiresAt.getTime() - Date.now()
+
+  // Requires a short expiry AND a matching client poll cadence. Run:
+  //   npx convex env set SESSION_EXPIRES_IN 30
+  //   npx convex env set SESSION_UPDATE_AGE 10
+  // and set SESSION_UPDATE_AGE=10 in this example's .env.local.
+  if (msUntilExpiry > 90_000) {
+    test.skip(true, `Session expires in ${Math.round(msUntilExpiry / 1000)}s — set SESSION_EXPIRES_IN=30 / SESSION_UPDATE_AGE=10 (Convex and .env.local) to run this test`)
+    return
+  }
+
+  // Stay on the page past the original expiry: the client's refetchInterval
+  // polling triggers better-auth's updateAge refresh, which extends the
+  // session and re-sets the browser cookie before it can lapse.
+  await page.waitForTimeout(msUntilExpiry + 5_000)
+
+  // The session must still be valid — the protected page stays accessible.
+  await page.goto("/protected")
+  await expect(page).toHaveURL("/protected")
 })
 
 test("logged-in user visiting /auth is redirected to /", async ({ page }) => {

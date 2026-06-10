@@ -149,9 +149,17 @@ import { convexClient, crossDomainClient } from "@convex-dev/better-auth/client/
 import { anonymousClient } from "better-auth/client/plugins"
 import type { AuthClient } from "@convex-dev/better-auth/react"
 import { cookieJarStorage, restoreAnonymousSessionClient } from "astro-convex-better-auth/client"
+import { SESSION_UPDATE_AGE } from "astro:env/client"
 
 const client = createAuthClient({
   baseURL: import.meta.env.PUBLIC_CONVEX_SITE_URL,
+  sessionOptions: {
+    // Keep an open tab's session alive: poll get-session at the updateAge
+    // cadence so better-auth refreshes the session before expiresIn elapses.
+    // Without this, better-auth never polls (refetchInterval defaults to 0)
+    // and an idle tab's session expires at expiresIn.
+    refetchInterval: SESSION_UPDATE_AGE,
+  },
   plugins: [
     convexClient(),
     // cookieJarStorage makes the browser cookie jar the single session store
@@ -172,6 +180,26 @@ export default authClient
 ```
 
 **Plugin order matters**: `restoreAnonymousSessionClient()` must come *after* `crossDomainClient()` in the plugins array — better-fetch runs plugin hooks in array order, and it inspects the cookie jar expecting `crossDomainClient` to have already applied the response's cookie changes.
+
+**Session keepalive**: better-auth only extends a session (its `updateAge` sliding window) when `get-session` is actually called, and its client never polls by default. `sessionOptions.refetchInterval` makes an open tab poll so the session is refreshed before `expiresIn` elapses. Using the server's `updateAge` as the cadence keeps one knob for both sides — expose it to the client via Astro's env schema in `astro.config.*`:
+
+```js
+import { defineConfig, envField } from "astro/config"
+
+export default defineConfig({
+  env: {
+    schema: {
+      // Mirror the Convex-side SESSION_UPDATE_AGE (npx convex env set …)
+      SESSION_UPDATE_AGE: envField.number({
+        context: "client",
+        access: "public",
+        default: 24 * 60 * 60,
+      }),
+    },
+  },
+  // ...
+})
+```
 
 ### Client-side usage (React components)
 
@@ -322,6 +350,8 @@ betterAuth({
   // ...
 })
 ```
+
+Set the same `SESSION_UPDATE_AGE` in your Astro app's `.env` so the client's keepalive polling matches (see [Session keepalive](#create-your-auth-client)). Sliding refresh works on both paths: the client persists the refreshed cookie via `crossDomainClient`, and the SSR middleware propagates refreshed session cookies from `get-session` back to the browser.
 
 ---
 

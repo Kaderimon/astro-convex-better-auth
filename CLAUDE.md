@@ -46,6 +46,7 @@ The virtual module exports `isStaticOutput(forceStatic?)`, which lets server-sid
   - Routes `/api/auth/*` directly to `authHandler`.
   - For all other routes, strips and re-prefixes cookies with `__Secure-` before calling `/api/auth/get-session` on the Convex site.
   - Populates `context.locals.user`, `context.locals.session`, and (with `includeConvexToken: true`) `context.locals.convexToken`.
+  - Propagates session cookies that better-auth refreshed during `get-session` (the `Set-Better-Auth-Cookie` response header) back to the browser, so sliding-session refresh extends the browser cookie's Max-Age.
   - With `restoreAnonymousSessions: true`, restores expired anonymous sessions from the `anon_identity` cookie via the restore endpoint (see layer 4).
   - Can be auto-injected by the integration via the `autoMiddleware` option (uses `server/middleware-entrypoint.ts`).
 
@@ -53,7 +54,7 @@ Cookies forwarded to Convex: `better-auth.convex_jwt` and `better-auth.session_t
 
 ### 3. Client building blocks (`client/`)
 
-No pre-configured client is exported — consumers compose their own `createAuthClient()` (see the README recipe; `examples/anonymous-restore/src/lib/auth-client.ts` is the living reference for the full recipe; `examples/basic` and `examples/anonymous` show the smaller tiers). Exports from `astro-convex-better-auth/client`:
+No pre-configured client is exported — consumers compose their own `createAuthClient()` (see the README recipe; `examples/anonymous-restore/src/lib/auth-client.ts` is the living reference for the full recipe; `examples/basic` and `examples/anonymous` show the smaller tiers). The recipe sets `sessionOptions.refetchInterval` to `SESSION_UPDATE_AGE` (exposed to the client via Astro's env schema) — better-auth never polls by default, so without it an idle open tab's session expires at `expiresIn`. Exports from `astro-convex-better-auth/client`:
 
 - **`cookieJarStorage`** — storage adapter for `crossDomainClient()` that backs the auth cookie store with `document.cookie` instead of localStorage, making the browser cookie jar the single session store shared with the SSR middleware.
 - **`restoreAnonymousSessionClient()`** — client plugin for anonymous session restoration: stores the signed `restoreToken` in the `anon_identity` cookie, clears it on sign-out, and calls the restore endpoint when `get-session` goes null. Takes no options (registering it is the opt-in); must come *after* `crossDomainClient()` in the plugins array.

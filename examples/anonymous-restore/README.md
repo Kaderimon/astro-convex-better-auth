@@ -118,6 +118,8 @@ pnpm dlx convex env set SESSION_EXPIRES_IN 30
 pnpm dlx convex env set SESSION_UPDATE_AGE 10
 ```
 
+and set `SESSION_UPDATE_AGE=10` in this example's `.env.local` so the client's keepalive polling (`sessionOptions.refetchInterval`) matches the server cadence.
+
 ## How it works
 
 ```

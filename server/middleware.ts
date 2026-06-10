@@ -1,4 +1,5 @@
 import type { Session, User } from "better-auth"
+import { parseSetCookieHeader } from "better-auth/cookies"
 import type { APIContext } from "astro"
 import type {
   ConvexBetterAuthMiddleware,
@@ -42,23 +43,62 @@ async function safeGetConvexToken(headers: Headers): Promise<string | null> {
 
 type SessionData = { user?: User; session?: Session }
 
+type FetchSessionResult = {
+  data: SessionData | null
+  /**
+   * `Set-Better-Auth-Cookie` response header — the crossDomain server plugin
+   * moves any `Set-Cookie` here when the request carries `Better-Auth-Cookie`.
+   * Present when better-auth refreshed the session (updateAge elapsed).
+   */
+  setCookie: string | null
+}
+
 function fetchSession(
   siteUrl: string,
   betterAuthCookie: string,
-): Promise<SessionData | null> {
+): Promise<FetchSessionResult> {
   return fetch(`${siteUrl}/api/auth/get-session`, {
     headers: { "Better-Auth-Cookie": betterAuthCookie },
   })
-    .then((res) =>
-      res.ok ? (res.json() as Promise<SessionData>) : null,
-    )
+    .then(async (res) => ({
+      data: res.ok ? ((await res.json()) as SessionData) : null,
+      setCookie: res.headers.get("set-better-auth-cookie"),
+    }))
     .catch((err) => {
       console.warn(
         "[astro-convex-better-auth] get-session fetch failed:",
         err,
       )
-      return null
+      return { data: null, setCookie: null }
     })
+}
+
+/**
+ * Writes the session cookies that better-auth refreshed during `get-session`
+ * back to the browser. Without this the browser cookie keeps the Max-Age of
+ * the original session and silently expires even though the server session
+ * was extended past it.
+ */
+function applyRefreshedCookies(context: APIContext, setCookie: string): void {
+  for (const [rawName, cookie] of parseSetCookieHeader(setCookie)) {
+    const name = rawName.startsWith(SECURE_COOKIE_PREFIX)
+      ? rawName.slice(SECURE_COOKIE_PREFIX.length)
+      : rawName
+    if (!FORWARDED_COOKIE_NAMES.has(name) || !cookie.value) continue
+    const maxAge =
+      cookie["max-age"] ??
+      (cookie.expires
+        ? Math.max(
+            0,
+            Math.floor((new Date(cookie.expires).getTime() - Date.now()) / 1000),
+          )
+        : undefined)
+    context.cookies.set(name, cookie.value, {
+      path: "/",
+      sameSite: "lax",
+      ...(maxAge !== undefined ? { maxAge: Number(maxAge) } : {}),
+    })
+  }
 }
 
 type RestoredSession = { user: User; session: Session; sessionToken: string }
@@ -148,7 +188,7 @@ export function convexBetterAuthMiddleware(
 
     if (appendedCookie) {
       // Run get-session and (optionally) the token fetch in parallel.
-      const [data, convexToken] = await Promise.all([
+      const [{ data, setCookie }, convexToken] = await Promise.all([
         fetchSession(siteUrl, appendedCookie),
         includeConvexToken
           ? safeGetConvexToken(context.request.headers)
@@ -158,6 +198,12 @@ export function convexBetterAuthMiddleware(
       context.locals.user = (data?.user as User) ?? null
       context.locals.session = (data?.session as Session) ?? null
       if (includeConvexToken) context.locals.convexToken = convexToken
+
+      // Only propagate refreshed cookies for a live session; a null result's
+      // cookie deletion is handled client-side by crossDomainClient.
+      if (setCookie && data?.session) {
+        applyRefreshedCookies(context, setCookie)
+      }
     }
 
     // Anonymous session restoration: no valid session but a signed

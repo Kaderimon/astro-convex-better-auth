@@ -9,9 +9,15 @@ import {
   cookieJarStorage,
   restoreAnonymousSessionClient,
 } from "astro-convex-better-auth/client"
+import { SESSION_UPDATE_AGE } from "astro:env/client"
 
 const client = createAuthClient({
   baseURL: import.meta.env.PUBLIC_CONVEX_SITE_URL,
+  sessionOptions: {
+    // Keep an open tab's session alive: poll get-session at the updateAge
+    // cadence so better-auth refreshes the session before expiresIn elapses.
+    refetchInterval: SESSION_UPDATE_AGE,
+  },
   plugins: [
     convexClient(),
     // cookieJarStorage makes the browser cookie jar the single session store

@@ -111,16 +111,6 @@ convexBetterAuthMiddleware({ includeConvexToken: true })
 // context.locals.convexToken will be set (string | null)
 ```
 
-**Optional — skip the `get-session` network call using local JWT verification:**
-
-```ts
-convexBetterAuthMiddleware({ jwtFastPath: true })
-```
-
-When enabled, the middleware verifies `better-auth.convex_jwt` locally against the Convex JWKS endpoint (cached in memory) and skips the `get-session` round-trip on cache hits. Falls back to `get-session` when the JWT is missing or expired.
-
-> **Note**: On a fast-path hit, `context.locals.user` will not contain `id` or `image` unless you override `definePayload` in your Convex backend's Better Auth configuration to include them.
-
 ### 3. Auth API catch-all — `src/pages/api/auth/[...all].ts`
 
 ```ts
@@ -172,18 +162,7 @@ await authClient.signIn.anonymous()
 await authClient.signUp.email({ name, email, password, callbackURL: "/" })
 ```
 
-**After a successful sign-in, sync cookies to the browser** so the next SSR request includes them:
-
-```ts
-import { syncCookiesToDocument } from "astro-convex-better-auth/client"
-
-// call once immediately after authClient.signIn.* or authClient.signUp.*
-syncCookiesToDocument()
-```
-
-> The Convex auth server (`xxx.convex.site`) is on a different origin from your Astro app, so the browser's cross-origin cookie rules block `Set-Cookie` responses from landing in your app's cookie jar. The `crossDomainClient()` plugin (already included in the pre-configured auth client) intercepts auth responses and stores cookies in `localStorage` instead. `syncCookiesToDocument()` reads them back out and writes them to `document.cookie`, where Astro's SSR middleware can pick them up.
->
-> You only need to call `syncCookiesToDocument()` **once after sign-in** — cookies written to `document.cookie` persist across page navigations until their 30-day `Max-Age` expires or the user signs out.
+> The Convex auth server (`xxx.convex.site`) is on a different origin from your Astro app, so the browser's cross-origin cookie rules block `Set-Cookie` responses from landing in your app's cookie jar. The pre-configured `authClient` includes the `crossDomainClient()` plugin (stores session cookies in `localStorage`) and the `astroConvexClient()` plugin (syncs them to `document.cookie` automatically after every successful auth response). No manual cookie calls are needed.
 
 ### Wrapping Convex-authenticated components
 
@@ -234,10 +213,87 @@ export default function MyReactIsland({ initialToken }: { initialToken?: string 
 
 ---
 
+## Anonymous session persistence
+
+By default, better-auth sessions expire after 7 days. When an anonymous user's session expires, better-auth deletes the session record and `signIn.anonymous()` always creates a **new** user — the original anonymous identity is permanently lost.
+
+This library ships a built-in mechanism to restore anonymous sessions transparently after they expire, without sending the user through `/auth`.
+
+### How it works
+
+1. `restoreAnonymousPlugin()` adds a signed `restoreToken` (`<userId>.<hmac>`, signed with your better-auth secret) to the `/sign-in/anonymous` response. The pre-configured `authClient` automatically writes it into a long-lived browser cookie (`anon_identity`, 1-year `Max-Age`).
+2. Enable `restoreAnonymousSessions: true` in `convexBetterAuthMiddleware`. When no session cookie is found but `anon_identity` is present, the middleware calls the plugin's restore endpoint, which verifies the token's signature and creates a new session for the stored user. The middleware then populates `context.locals` and sets a fresh session cookie — all before any route guard runs.
+3. Register `restoreAnonymousPlugin()` in your Convex auth config to expose the restore endpoint.
+4. On the next client-side auth request, the pre-configured `authClient` adopts the restored session cookie back into the cross-domain `localStorage` store (which is what client requests actually send), so `useSession()` also sees the restored session — no reload or re-login needed.
+5. If the session expires while the page is open (`get-session` starts returning null), the client clears the dead session cookies and calls the restore endpoint itself (rate-limited), so `useSession()` recovers in place without a reload.
+
+Because the token is HMAC-signed server-side, knowing an anonymous user's ID is not enough to take over their account — only a client that received the original sign-in response can restore the session.
+
+### Setup
+
+**1. Convex backend — `convex/auth.ts`**
+
+```ts
+import { restoreAnonymousPlugin } from "astro-convex-better-auth/plugins"
+import { anonymous } from "better-auth/plugins"
+
+betterAuth({
+  plugins: [
+    convex({ authConfig }),
+    anonymous(),
+    restoreAnonymousPlugin(), // exposes POST /api/auth/restore-anonymous-session
+  ],
+})
+```
+
+**2. Astro middleware — `src/middleware.ts`**
+
+```ts
+convexBetterAuthMiddleware({ restoreAnonymousSessions: true })
+```
+
+**3. Client — sign in anonymously**
+
+```ts
+await authClient.signIn.anonymous()
+// the anon_identity cookie is set and cookies are synced automatically
+```
+
+> If you build a **custom auth client** instead of using the pre-configured one, pass `astroConvexClient({ restoreAnonymousSessions: true })` (default is `false`, symmetric with the middleware option). **Plugin order matters**: `astroConvexClient()` must come *after* `crossDomainClient()` in the plugins array — better-fetch runs plugin hooks in array order, and `astroConvexClient` needs to run after `crossDomainClient` has built the `Better-Auth-Cookie` header and written `localStorage`.
+
+**4. Client — sign out**
+
+```ts
+await authClient.signOut()
+// the anon_identity cookie is cleared automatically
+```
+
+### Expiry configuration
+
+To test session restoration quickly, set a short expiry on your Convex backend and rely on `updateAge` (sliding sessions) to keep active users' sessions alive:
+
+```
+npx convex env set SESSION_EXPIRES_IN 30   # 30 seconds (demo only)
+npx convex env set SESSION_UPDATE_AGE 10   # slide every 10 s
+```
+
+In `convex/auth.ts`:
+
+```ts
+betterAuth({
+  session: {
+    expiresIn: parseInt(process.env.SESSION_EXPIRES_IN ?? String(7 * 24 * 60 * 60)),
+    updateAge: parseInt(process.env.SESSION_UPDATE_AGE ?? String(24 * 60 * 60)),
+  },
+  // ...
+})
+```
+
+---
+
 ## How it works
 
 > **Internals** — not required reading for normal use.
 >
 > On each SSR request the middleware reads the `better-auth.convex_jwt` and `better-auth.session_token` cookies, prefixes them with `__Secure-`, and sends them in a `Better-Auth-Cookie` header to `PUBLIC_CONVEX_SITE_URL/api/auth/get-session`. The JSON response is parsed and mapped to `context.locals.user` / `context.locals.session`. This is why `PUBLIC_CONVEX_SITE_URL` (the `.convex.site` URL, not `.convex.cloud`) is required — that endpoint is an HTTP action on the Convex backend.
 >
-> When `jwtFastPath: true` is set, the middleware first attempts to verify `better-auth.convex_jwt` locally using the JWKS at `PUBLIC_CONVEX_SITE_URL/api/auth/convex/jwks` (fetched once and cached in memory). A valid JWT skips the `get-session` network call entirely.

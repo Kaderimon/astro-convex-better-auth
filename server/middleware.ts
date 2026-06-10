@@ -1,26 +1,23 @@
 import type { Session, User } from "better-auth"
+import type { APIContext } from "astro"
 import type {
   ConvexBetterAuthMiddleware,
   ConvexBetterAuthMiddlewareOptions,
 } from "../types"
+import {
+  ANON_IDENTITY_COOKIE,
+  CONVEX_JWT_COOKIE,
+  RESTORE_ANONYMOUS_SESSION_PATH,
+  RESTORE_REJECTION_STATUSES,
+  SECURE_COOKIE_PREFIX,
+  SESSION_TOKEN_COOKIE,
+} from "../shared/constants"
 import { authHandler, getConvexToken } from "./auth-server"
 import { getConvexSiteUrl } from "./env"
-import { verifyConvexJwt } from "./jwks"
 
 const FORWARDED_COOKIE_NAMES = new Set([
-  "better-auth.convex_jwt",
-  "better-auth.session_token",
-])
-
-// RFC 7519 §4.1 registered claim names — excluded from the user fields spread
-const JWT_STANDARD_CLAIMS = new Set([
-  "iss",
-  "sub",
-  "aud",
-  "exp",
-  "nbf",
-  "iat",
-  "jti",
+  CONVEX_JWT_COOKIE,
+  SESSION_TOKEN_COOKIE,
 ])
 
 function parseCookies(cookieHeader: string): Map<string, string> {
@@ -43,10 +40,79 @@ async function safeGetConvexToken(headers: Headers): Promise<string | null> {
   }
 }
 
+type SessionData = { user?: User; session?: Session }
+
+function fetchSession(
+  siteUrl: string,
+  betterAuthCookie: string,
+): Promise<SessionData | null> {
+  return fetch(`${siteUrl}/api/auth/get-session`, {
+    headers: { "Better-Auth-Cookie": betterAuthCookie },
+  })
+    .then((res) =>
+      res.ok ? (res.json() as Promise<SessionData>) : null,
+    )
+    .catch((err) => {
+      console.warn(
+        "[astro-convex-better-auth] get-session fetch failed:",
+        err,
+      )
+      return null
+    })
+}
+
+type RestoredSession = { user: User; session: Session; sessionToken: string }
+
+/**
+ * Calls the `restoreAnonymousPlugin` endpoint to mint a fresh session for a
+ * signed restore token. Clears the stale `anon_identity` cookie when the
+ * backend rejects the token (invalid signature, user deleted, not anonymous);
+ * keeps it on network errors so restoration can be retried.
+ */
+async function tryRestoreAnonymousSession(
+  context: APIContext,
+  siteUrl: string,
+  rawRestoreToken: string,
+): Promise<RestoredSession | null> {
+  try {
+    const res = await fetch(
+      `${siteUrl}/api/auth${RESTORE_ANONYMOUS_SESSION_PATH}`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ token: decodeURIComponent(rawRestoreToken) }),
+      },
+    )
+
+    if (!res.ok) {
+      // Drop the cookie only on a definitive rejection; transient failures
+      // (5xx, 429) keep it so a later request can retry the restore.
+      if (RESTORE_REJECTION_STATUSES.has(res.status)) {
+        context.cookies.delete(ANON_IDENTITY_COOKIE, { path: "/" })
+      }
+      return null
+    }
+
+    const { sessionToken, user, session } = (await res.json()) as
+      Partial<RestoredSession>
+    if (!sessionToken || !user || !session) return null
+    return { user, session, sessionToken }
+  } catch (err) {
+    console.warn(
+      "[astro-convex-better-auth] restore-anonymous-session failed:",
+      err,
+    )
+    return null
+  }
+}
+
 export function convexBetterAuthMiddleware(
   options: ConvexBetterAuthMiddlewareOptions = {},
 ): ConvexBetterAuthMiddleware {
-  const { includeConvexToken = false, jwtFastPath = false } = options
+  const {
+    includeConvexToken = false,
+    restoreAnonymousSessions = false,
+  } = options
 
   return async (context, next) => {
     const { pathname } = context.url
@@ -62,71 +128,70 @@ export function convexBetterAuthMiddleware(
     const appendedCookie = cookieMap
       ? Array.from(cookieMap.entries())
           .filter(([name]) => FORWARDED_COOKIE_NAMES.has(name))
-          .map(([name, value]) => `__Secure-${name}=${value}`)
+          .map(([name, value]) => `${SECURE_COOKIE_PREFIX}${name}=${value}`)
           .join("; ")
       : ""
 
-    if (!appendedCookie) {
-      context.locals.user = null
-      context.locals.session = null
-      if (includeConvexToken) context.locals.convexToken = null
+    context.locals.user = null
+    context.locals.session = null
+    if (includeConvexToken) context.locals.convexToken = null
+
+    const anonRestoreToken = restoreAnonymousSessions
+      ? cookieMap?.get(ANON_IDENTITY_COOKIE)
+      : undefined
+
+    if (!appendedCookie && !anonRestoreToken) {
       return next()
     }
 
     const siteUrl = getConvexSiteUrl()
 
-    // JWT fast-path: verify convex_jwt locally to skip the get-session round-trip.
-    // Falls back to get-session if the JWT is absent or fails verification.
-    // Note: context.locals.user will not contain id or image on fast-path hits unless
-    // definePayload is overridden in the Convex backend to include them.
-    if (jwtFastPath) {
-      const jwtToken = cookieMap!.get("better-auth.convex_jwt")
-      if (jwtToken) {
-        const payload = await verifyConvexJwt(jwtToken, siteUrl)
-        if (payload) {
-          const { sessionId, ...rest } = payload
-          const userFields = Object.fromEntries(
-            Object.entries(rest).filter(([k]) => !JWT_STANDARD_CLAIMS.has(k)),
+    if (appendedCookie) {
+      // Run get-session and (optionally) the token fetch in parallel.
+      const [data, convexToken] = await Promise.all([
+        fetchSession(siteUrl, appendedCookie),
+        includeConvexToken
+          ? safeGetConvexToken(context.request.headers)
+          : Promise.resolve(null),
+      ])
+
+      context.locals.user = (data?.user as User) ?? null
+      context.locals.session = (data?.session as Session) ?? null
+      if (includeConvexToken) context.locals.convexToken = convexToken
+    }
+
+    // Anonymous session restoration: no valid session but a signed
+    // `anon_identity` cookie is present — recreate the session for the stored
+    // anonymous user without redirecting through the auth page.
+    if (anonRestoreToken && !context.locals.session) {
+      const restored = await tryRestoreAnonymousSession(
+        context,
+        siteUrl,
+        anonRestoreToken,
+      )
+      if (restored) {
+        context.locals.user = restored.user
+        context.locals.session = restored.session
+        const expiresAtMs = new Date(restored.session.expiresAt).getTime()
+        context.cookies.set(SESSION_TOKEN_COOKIE, restored.sessionToken, {
+          path: "/",
+          sameSite: "lax",
+          // Omit maxAge when expiresAt is missing/unparsable — a session
+          // cookie beats one expiring immediately from maxAge: NaN.
+          ...(Number.isFinite(expiresAtMs)
+            ? { maxAge: Math.max(0, Math.floor((expiresAtMs - Date.now()) / 1000)) }
+            : {}),
+        })
+        if (includeConvexToken) {
+          const headers = new Headers(context.request.headers)
+          headers.set(
+            "cookie",
+            `${SESSION_TOKEN_COOKIE}=${restored.sessionToken}`,
           )
-          context.locals.user = userFields as unknown as User
-          context.locals.session = sessionId
-            ? ({ id: sessionId } as unknown as Session)
-            : null
-          if (includeConvexToken) {
-            context.locals.convexToken = await safeGetConvexToken(
-              context.request.headers,
-            )
-          }
-          return next()
+          context.locals.convexToken = await safeGetConvexToken(headers)
         }
       }
     }
-
-    // Run get-session and (optionally) the token fetch in parallel.
-    const [data, convexToken] = await Promise.all([
-      fetch(`${siteUrl}/api/auth/get-session`, {
-        headers: { "Better-Auth-Cookie": appendedCookie },
-      })
-        .then((res) =>
-          res.ok
-            ? (res.json() as Promise<{ user?: User; session?: Session }>)
-            : null,
-        )
-        .catch((err) => {
-          console.warn(
-            "[astro-convex-better-auth] get-session fetch failed:",
-            err,
-          )
-          return null
-        }),
-      includeConvexToken
-        ? safeGetConvexToken(context.request.headers)
-        : Promise.resolve(null),
-    ])
-
-    context.locals.user = (data?.user as User) ?? null
-    context.locals.session = (data?.session as Session) ?? null
-    if (includeConvexToken) context.locals.convexToken = convexToken
 
     return next()
   }

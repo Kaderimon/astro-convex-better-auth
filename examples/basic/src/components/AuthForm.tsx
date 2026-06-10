@@ -1,6 +1,5 @@
 import { useState } from "react"
 import authClient from "astro-convex-better-auth/client"
-import { syncCookiesToDocument } from "astro-convex-better-auth/client"
 
 type Mode = "signin" | "signup"
 
@@ -21,7 +20,6 @@ export default function AuthForm() {
         setError(err.message ?? "Anonymous sign in failed")
         return
       }
-      syncCookiesToDocument()
       window.location.href = "/"
     } catch (err) {
       setError(err instanceof Error ? err.message : "An error occurred")
@@ -59,9 +57,6 @@ export default function AuthForm() {
         }
       }
 
-      // Sync cross-domain cookies from localStorage → document.cookie so the
-      // next SSR request's middleware can read the session.
-      syncCookiesToDocument()
       window.location.href = "/"
     } catch (err) {
       setError(err instanceof Error ? err.message : "An error occurred")

@@ -23,14 +23,17 @@ export type ConvexBetterAuthIntegrationOptions = {
 export type ConvexBetterAuthMiddlewareOptions = {
   includeConvexToken?: boolean
   /**
-   * When true, verifies the `better-auth.convex_jwt` cookie locally against the
-   * Convex JWKS endpoint and skips the `get-session` network call on cache hits.
-   * Falls back to `get-session` when the JWT is absent or fails verification.
+   * When true, checks for a signed `anon_identity` browser cookie whenever no
+   * session is found. If present, calls `POST /api/auth/restore-anonymous-session`
+   * on the Convex backend, which verifies the token's HMAC signature and creates
+   * a new session for the stored anonymous user, then populates `context.locals`
+   * for the current request without a redirect.
    *
-   * Note: `context.locals.user` will lack `id` and `image` on fast-path hits
-   * unless you override `definePayload` in your Convex backend to include them.
+   * Requires `restoreAnonymousPlugin()` (from `astro-convex-better-auth/plugins`)
+   * to be registered in your Convex auth config. The pre-configured `authClient`
+   * sets the cookie automatically after anonymous sign-in.
    */
-  jwtFastPath?: boolean
+  restoreAnonymousSessions?: boolean
 }
 
 export type ConvexBetterAuthLocals = {

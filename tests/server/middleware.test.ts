@@ -9,12 +9,7 @@ vi.mock("../../server/auth-server", () => ({
   getConvexToken: vi.fn(),
 }))
 
-vi.mock("../../server/jwks", () => ({
-  verifyConvexJwt: vi.fn(),
-}))
-
 import { authHandler, getConvexToken } from "../../server/auth-server"
-import { verifyConvexJwt } from "../../server/jwks"
 import { convexBetterAuthMiddleware } from "../../server/middleware"
 
 const SITE_URL = "https://example.convex.cloud"
@@ -25,10 +20,15 @@ type AstroLocals = {
   convexToken?: unknown
 }
 
+type AstroCookies = {
+  set: ReturnType<typeof vi.fn>
+  delete: ReturnType<typeof vi.fn>
+}
+
 function makeContext(
   path: string,
   cookieHeader?: string,
-): { url: URL; request: Request; locals: AstroLocals } {
+): { url: URL; request: Request; locals: AstroLocals; cookies: AstroCookies } {
   const headers = new Headers()
   if (cookieHeader !== undefined) {
     headers.set("cookie", cookieHeader)
@@ -37,6 +37,7 @@ function makeContext(
     url: new URL(`http://myapp.example.com${path}`),
     request: new Request(`http://myapp.example.com${path}`, { headers }),
     locals: {} as AstroLocals,
+    cookies: { set: vi.fn(), delete: vi.fn() },
   }
 }
 
@@ -49,7 +50,6 @@ describe("convexBetterAuthMiddleware", () => {
     mockNext.mockResolvedValue(new Response("next"))
     vi.mocked(authHandler).mockResolvedValue(mockAuthResponse)
     vi.mocked(getConvexToken).mockResolvedValue("convex-jwt-token")
-    vi.mocked(verifyConvexJwt).mockResolvedValue(null)
     vi.stubGlobal("fetch", vi.fn())
   })
 
@@ -293,118 +293,210 @@ describe("convexBetterAuthMiddleware", () => {
     })
   })
 
-  describe("jwtFastPath — fast path hit", () => {
-    const JWT_COOKIE =
-      "better-auth.convex_jwt=eyJ.test.jwt; better-auth.session_token=s"
-    // JWT_STANDARD_CLAIMS filtered: iss, sub, aud, exp, nbf, iat, jti, sessionId
-    const jwtPayload = {
-      sub: "user1",          // filtered by JWT_STANDARD_CLAIMS
-      sessionId: "sess_abc", // destructured separately
-      name: "Alice",
-      email: "alice@example.com",
-      iat: 1000,             // filtered
-      exp: 9999,             // filtered
-      iss: SITE_URL,         // filtered
-      aud: "convex",         // filtered
+  describe("restoreAnonymousSessions", () => {
+    const RESTORE_URL = `${SITE_URL}/api/auth/restore-anonymous-session`
+    const restoredData = {
+      sessionToken: "tok123",
+      user: { id: "u1", isAnonymous: true },
+      session: {
+        id: "s2",
+        expiresAt: new Date(Date.now() + 60_000).toISOString(),
+      },
     }
 
-    beforeEach(() => {
-      vi.mocked(verifyConvexJwt).mockResolvedValue(jwtPayload)
+    function setupRestoreFetch() {
+      const mockFetch = vi.fn(async (url: string) => {
+        if (url.endsWith("/get-session")) {
+          return new Response(JSON.stringify({ user: null, session: null }), {
+            status: 200,
+          })
+        }
+        return new Response(JSON.stringify(restoredData), { status: 200 })
+      })
+      vi.stubGlobal("fetch", mockFetch)
+      return mockFetch
+    }
+
+    it("restores the session when only the anon_identity cookie is present", async () => {
+      const mockFetch = setupRestoreFetch()
+      const mw = convexBetterAuthMiddleware({ restoreAnonymousSessions: true })
+      const ctx = makeContext("/dashboard", "anon_identity=u1.sig")
+
+      await mw(ctx as never, mockNext)
+
+      expect(mockFetch).toHaveBeenCalledWith(
+        RESTORE_URL,
+        expect.objectContaining({
+          method: "POST",
+          body: JSON.stringify({ token: "u1.sig" }),
+        }),
+      )
+      expect(ctx.locals.user).toEqual(restoredData.user)
+      expect(ctx.locals.session).toEqual(restoredData.session)
+      expect(mockNext).toHaveBeenCalled()
     })
 
-    it("skips get-session when verifyConvexJwt returns valid payload", async () => {
+    it("sets a session cookie with maxAge derived from session.expiresAt", async () => {
+      setupRestoreFetch()
+      const mw = convexBetterAuthMiddleware({ restoreAnonymousSessions: true })
+      const ctx = makeContext("/dashboard", "anon_identity=u1.sig")
+
+      await mw(ctx as never, mockNext)
+
+      expect(ctx.cookies.set).toHaveBeenCalledWith(
+        "better-auth.session_token",
+        "tok123",
+        expect.objectContaining({ path: "/", sameSite: "lax" }),
+      )
+      const { maxAge } = ctx.cookies.set.mock.calls[0][2]
+      expect(maxAge).toBeGreaterThan(0)
+      expect(maxAge).toBeLessThanOrEqual(60)
+    })
+
+    it("attempts restore after get-session returns no session", async () => {
+      const mockFetch = setupRestoreFetch()
+      const mw = convexBetterAuthMiddleware({ restoreAnonymousSessions: true })
+      const ctx = makeContext(
+        "/dashboard",
+        "better-auth.session_token=expired; anon_identity=u1.sig",
+      )
+
+      await mw(ctx as never, mockNext)
+
+      expect(mockFetch).toHaveBeenCalledTimes(2)
+      expect(ctx.locals.user).toEqual(restoredData.user)
+      expect(ctx.locals.session).toEqual(restoredData.session)
+    })
+
+    it("does not call the restore endpoint when the option is disabled", async () => {
       const mockFetch = vi.fn()
       vi.stubGlobal("fetch", mockFetch)
-      const mw = convexBetterAuthMiddleware({ jwtFastPath: true })
-      const ctx = makeContext("/dashboard", JWT_COOKIE)
+      const mw = convexBetterAuthMiddleware()
+      const ctx = makeContext("/dashboard", "anon_identity=u1.sig")
 
       await mw(ctx as never, mockNext)
 
       expect(mockFetch).not.toHaveBeenCalled()
-    })
-
-    it("strips sub, iss, aud, iat, exp and sessionId from user payload (JWT_STANDARD_CLAIMS)", async () => {
-      const mw = convexBetterAuthMiddleware({ jwtFastPath: true })
-      const ctx = makeContext("/dashboard", JWT_COOKIE)
-
-      await mw(ctx as never, mockNext)
-
-      // Only non-standard, non-sessionId fields remain
-      expect(ctx.locals.user).toEqual({ name: "Alice", email: "alice@example.com" })
-    })
-
-    it("builds session as {id: sessionId} when sessionId is present", async () => {
-      const mw = convexBetterAuthMiddleware({ jwtFastPath: true })
-      const ctx = makeContext("/dashboard", JWT_COOKIE)
-
-      await mw(ctx as never, mockNext)
-
-      expect(ctx.locals.session).toEqual({ id: "sess_abc" })
-    })
-
-    it("sets session=null when sessionId is absent from JWT payload", async () => {
-      const { sessionId: _, ...payloadWithoutSession } = jwtPayload
-      vi.mocked(verifyConvexJwt).mockResolvedValue(payloadWithoutSession)
-      const mw = convexBetterAuthMiddleware({ jwtFastPath: true })
-      const ctx = makeContext("/dashboard", JWT_COOKIE)
-
-      await mw(ctx as never, mockNext)
-
+      expect(ctx.locals.user).toBeNull()
       expect(ctx.locals.session).toBeNull()
     })
 
-    it("sets convexToken when includeConvexToken=true on fast path", async () => {
-      const mw = convexBetterAuthMiddleware({
-        jwtFastPath: true,
-        includeConvexToken: true,
-      })
-      const ctx = makeContext("/dashboard", JWT_COOKIE)
+    it("does not restore when a valid session already exists", async () => {
+      const mockFetch = vi.fn().mockResolvedValue(
+        new Response(
+          JSON.stringify({ user: { id: "u1" }, session: { id: "s1" } }),
+          { status: 200 },
+        ),
+      )
+      vi.stubGlobal("fetch", mockFetch)
+      const mw = convexBetterAuthMiddleware({ restoreAnonymousSessions: true })
+      const ctx = makeContext(
+        "/dashboard",
+        "better-auth.session_token=s; anon_identity=u1.sig",
+      )
 
       await mw(ctx as never, mockNext)
 
-      expect(getConvexToken).toHaveBeenCalled()
-      expect(ctx.locals.convexToken).toBe("convex-jwt-token")
+      expect(mockFetch).toHaveBeenCalledTimes(1)
+      expect(ctx.locals.session).toEqual({ id: "s1" })
     })
-  })
 
-  describe("jwtFastPath — fallback to get-session", () => {
-    function setupFetchSuccess(data = { user: { id: "u1" }, session: { id: "s1" } }) {
+    it("clears the anon_identity cookie when the restore endpoint rejects", async () => {
+      vi.stubGlobal(
+        "fetch",
+        vi.fn().mockResolvedValue(new Response("Unauthorized", { status: 401 })),
+      )
+      const mw = convexBetterAuthMiddleware({ restoreAnonymousSessions: true })
+      const ctx = makeContext("/dashboard", "anon_identity=u1.badsig")
+
+      await mw(ctx as never, mockNext)
+
+      expect(ctx.cookies.delete).toHaveBeenCalledWith("anon_identity", {
+        path: "/",
+      })
+      expect(ctx.locals.session).toBeNull()
+      expect(mockNext).toHaveBeenCalled()
+    })
+
+    it("keeps the anon_identity cookie on transient restore failures (5xx)", async () => {
+      vi.stubGlobal(
+        "fetch",
+        vi
+          .fn()
+          .mockResolvedValue(
+            new Response("Service Unavailable", { status: 503 }),
+          ),
+      )
+      const mw = convexBetterAuthMiddleware({ restoreAnonymousSessions: true })
+      const ctx = makeContext("/dashboard", "anon_identity=u1.sig")
+
+      await mw(ctx as never, mockNext)
+
+      expect(ctx.cookies.delete).not.toHaveBeenCalled()
+      expect(ctx.locals.session).toBeNull()
+      expect(mockNext).toHaveBeenCalled()
+    })
+
+    it("omits maxAge when session.expiresAt is missing or unparsable", async () => {
       vi.stubGlobal(
         "fetch",
         vi.fn().mockResolvedValue(
-          new Response(JSON.stringify(data), { status: 200 }),
+          new Response(
+            JSON.stringify({
+              sessionToken: "tok123",
+              user: { id: "u1", isAnonymous: true },
+              session: { id: "s2" },
+            }),
+            { status: 200 },
+          ),
         ),
       )
-    }
-
-    it("falls back to get-session when jwt cookie is missing (only session_token present)", async () => {
-      setupFetchSuccess()
-      const mw = convexBetterAuthMiddleware({ jwtFastPath: true })
-      const ctx = makeContext("/dashboard", "better-auth.session_token=s")
+      const mw = convexBetterAuthMiddleware({ restoreAnonymousSessions: true })
+      const ctx = makeContext("/dashboard", "anon_identity=u1.sig")
 
       await mw(ctx as never, mockNext)
 
-      expect(fetch).toHaveBeenCalledWith(
-        `${SITE_URL}/api/auth/get-session`,
-        expect.any(Object),
+      expect(ctx.cookies.set).toHaveBeenCalledWith(
+        "better-auth.session_token",
+        "tok123",
+        expect.objectContaining({ path: "/", sameSite: "lax" }),
       )
+      const cookieOptions = ctx.cookies.set.mock.calls[0][2]
+      expect("maxAge" in cookieOptions).toBe(false)
     })
 
-    it("falls back to get-session when verifyConvexJwt returns null", async () => {
-      setupFetchSuccess()
-      vi.mocked(verifyConvexJwt).mockResolvedValue(null)
-      const mw = convexBetterAuthMiddleware({ jwtFastPath: true })
-      const ctx = makeContext(
-        "/dashboard",
-        "better-auth.convex_jwt=bad; better-auth.session_token=s",
+    it("keeps the cookie and proceeds unauthenticated on network error", async () => {
+      vi.stubGlobal(
+        "fetch",
+        vi.fn().mockRejectedValue(new Error("Network error")),
       )
+      const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {})
+      const mw = convexBetterAuthMiddleware({ restoreAnonymousSessions: true })
+      const ctx = makeContext("/dashboard", "anon_identity=u1.sig")
 
       await mw(ctx as never, mockNext)
 
-      expect(fetch).toHaveBeenCalledWith(
-        `${SITE_URL}/api/auth/get-session`,
-        expect.any(Object),
+      expect(ctx.cookies.delete).not.toHaveBeenCalled()
+      expect(ctx.locals.session).toBeNull()
+      expect(mockNext).toHaveBeenCalled()
+      warnSpy.mockRestore()
+    })
+
+    it("sets convexToken for the restored session when includeConvexToken=true", async () => {
+      setupRestoreFetch()
+      const mw = convexBetterAuthMiddleware({
+        restoreAnonymousSessions: true,
+        includeConvexToken: true,
+      })
+      const ctx = makeContext("/dashboard", "anon_identity=u1.sig")
+
+      await mw(ctx as never, mockNext)
+
+      const tokenHeaders = vi.mocked(getConvexToken).mock.calls.at(-1)?.[0]
+      expect(tokenHeaders?.get("cookie")).toBe(
+        "better-auth.session_token=tok123",
       )
+      expect(ctx.locals.convexToken).toBe("convex-jwt-token")
     })
   })
 })

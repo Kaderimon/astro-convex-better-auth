@@ -21,6 +21,10 @@
     "./server/middleware-entrypoint": {
       "import": "./dist/server/middleware-entrypoint.mjs",
       "types": "./dist/server/middleware-entrypoint.d.mts"
+    },
+    "./plugins": {
+      "import": "./dist/plugins.mjs",
+      "types": "./dist/plugins.d.mts"
     }
   },
   "files": [
@@ -48,7 +52,7 @@
   "type": "module",
   "license": "MIT",
   "dependencies": {
-    "jose": "^6.2.3"
+    "zod": "^4.3.6"
   },
   "devDependencies": {
     "@convex-dev/better-auth": "^0.12.2",

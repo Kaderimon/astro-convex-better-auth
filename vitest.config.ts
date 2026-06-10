@@ -4,7 +4,7 @@ import { defineConfig } from "vitest/config"
 export default defineConfig({
   test: {
     environment: "node",
-    environmentMatchGlobs: [["tests/client/**", "jsdom"]],
+    exclude: ["examples/**", "node_modules/**"],
   },
   resolve: {
     alias: {

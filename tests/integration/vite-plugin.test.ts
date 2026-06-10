@@ -66,7 +66,7 @@ describe("vitePluginAstroConfig", () => {
     })
 
     it("serializes middlewareOptions into the module string", () => {
-      const opts = { includeConvexToken: true, jwtFastPath: false }
+      const opts = { includeConvexToken: true, restoreAnonymousSessions: false }
       const plugin = makePlugin("server", opts)
       const load = plugin.load as (id: string) => string | undefined
 

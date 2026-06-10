@@ -1,9 +1,8 @@
 import {
   ANON_IDENTITY_COOKIE,
-  CONVEX_JWT_COOKIE,
+  BETTER_AUTH_COOKIE_PREFIX,
   COOKIE_STORAGE_KEY,
   SECURE_COOKIE_PREFIX,
-  SESSION_TOKEN_COOKIE,
 } from "../shared/constants"
 
 /**
@@ -59,11 +58,10 @@ export interface StoredCookie {
   expires: string | null
 }
 
-const STORED_SESSION_TOKEN_KEY = `${SECURE_COOKIE_PREFIX}${SESSION_TOKEN_COOKIE}`
-
-function isUnexpired(v: StoredCookie): boolean {
-  return !v.expires || new Date(v.expires) >= new Date()
-}
+// Fallback lifetime (30 days) for store entries whose expiry metadata is
+// unknown — entries reconstructed from document.cookie always lack it, since
+// a cookie's remaining lifetime cannot be read back from the jar.
+const DEFAULT_COOKIE_MAX_AGE = 2_592_000
 
 function parseCookieJson(raw: string): Record<string, StoredCookie> {
   try {
@@ -73,70 +71,78 @@ function parseCookieJson(raw: string): Record<string, StoredCookie> {
   }
 }
 
-export function getCookies(raw: string): string[] {
-  return Object.entries(parseCookieJson(raw))
-    .filter(([, v]) => isUnexpired(v))
-    .map(([k, v]) => `${k.replace(SECURE_COOKIE_PREFIX, "")}=${v.value}`)
-}
-
-export function syncCookiesToDocument() {
-  getCookies(localStorage.getItem(COOKIE_STORAGE_KEY) ?? "").forEach((c) => {
-    document.cookie = `${c}; Path=/; SameSite=Lax; Max-Age=2592000`
-  })
-}
-
-function parseStoredCookies(): Record<string, StoredCookie> {
-  return parseCookieJson(localStorage.getItem(COOKIE_STORAGE_KEY) ?? "{}")
-}
-
-/**
- * Reverse sync (document.cookie → localStorage): adopts a session token that
- * exists in the browser cookie jar but not in the crossDomainClient store.
- * This happens when `convexBetterAuthMiddleware({ restoreAnonymousSessions: true })`
- * restores a session server-side — the middleware can only set a cookie, while
- * client-side auth requests read from localStorage.
- *
- * Returns the updated store when an adoption happened (pass it to
- * `buildBetterAuthCookieHeader` to avoid re-parsing), or null when the store
- * already agreed with the cookie jar.
- */
-export function adoptRestoredSessionCookie(): Record<string, StoredCookie> | null {
-  const cookieValue = readDocumentCookie(SESSION_TOKEN_COOKIE)
-  if (!cookieValue) return null
-
-  const stored = parseStoredCookies()
-  const existing = stored[STORED_SESSION_TOKEN_KEY]
-  if (existing && isUnexpired(existing) && existing.value === cookieValue) {
-    return null
+function documentCookieEntries(): Array<[name: string, value: string]> {
+  const entries: Array<[string, string]> = []
+  for (const part of document.cookie.split("; ")) {
+    const eqIdx = part.indexOf("=")
+    if (eqIdx !== -1) {
+      entries.push([part.slice(0, eqIdx), part.slice(eqIdx + 1)])
+    }
   }
-
-  stored[STORED_SESSION_TOKEN_KEY] = { value: cookieValue, expires: null }
-  localStorage.setItem(COOKIE_STORAGE_KEY, JSON.stringify(stored))
-  return stored
+  return entries
 }
 
 /**
- * Builds the `Better-Auth-Cookie` header value from the crossDomainClient
- * localStorage store (or a pre-parsed copy of it), keeping the `__Secure-`
- * prefixes the Convex backend expects. Mirrors crossDomainClient's own header
- * construction so the header can be rebuilt after `adoptRestoredSessionCookie()`
- * updates the store.
+ * Storage adapter for `crossDomainClient()` that backs its cookie store with
+ * `document.cookie` instead of localStorage, so the browser cookie jar is the
+ * single source of truth shared by client-side auth requests and the Astro
+ * SSR middleware. A session cookie set server-side (e.g. by
+ * `convexBetterAuthMiddleware({ restoreAnonymousSessions: true })`) is
+ * immediately visible to the auth client, and cookies the auth client drops
+ * (sign-out, an expired session reported by `get-session`) leave the jar in
+ * the same write.
+ *
+ * Mapping: a store entry `__Secure-better-auth.x` is the document cookie
+ * `better-auth.x` (the `__Secure-` prefix only exists on the https Convex
+ * origin). Every document cookie named `better-auth.*` belongs to the store —
+ * a custom better-auth `cookiePrefix` is not supported. Expiry metadata is
+ * translated to `Max-Age` on write and enforced by the browser; reads report
+ * `expires: null`. Non-cookie keys (the crossDomainClient session-data cache)
+ * fall through to localStorage.
  */
-export function buildBetterAuthCookieHeader(
-  store: Record<string, StoredCookie> = parseStoredCookies(),
-): string {
-  return Object.entries(store)
-    .filter(([, v]) => isUnexpired(v))
-    .map(([k, v]) => `${k}=${v.value}`)
-    .join("; ")
-}
+export const cookieJarStorage = {
+  getItem(key: string): string | null {
+    if (typeof document === "undefined") return null
+    if (key !== COOKIE_STORAGE_KEY) return localStorage.getItem(key)
+    const store: Record<string, StoredCookie> = {}
+    for (const [name, value] of documentCookieEntries()) {
+      if (name.startsWith(BETTER_AUTH_COOKIE_PREFIX)) {
+        store[`${SECURE_COOKIE_PREFIX}${name}`] = { value, expires: null }
+      }
+    }
+    return JSON.stringify(store)
+  },
 
-/**
- * Expires the better-auth session cookies in document.cookie — call on
- * sign-out so a revoked token is not re-adopted into the client store by
- * `adoptRestoredSessionCookie()` on subsequent requests.
- */
-export function clearSessionCookiesFromDocument(): void {
-  document.cookie = `${SESSION_TOKEN_COOKIE}=; Path=/; Max-Age=0`
-  document.cookie = `${CONVEX_JWT_COOKIE}=; Path=/; Max-Age=0`
+  setItem(key: string, value: string): void {
+    if (typeof document === "undefined") return
+    if (key !== COOKIE_STORAGE_KEY) {
+      localStorage.setItem(key, value)
+      return
+    }
+    const store = parseCookieJson(value)
+    const written = new Set<string>()
+    for (const [storedName, cookie] of Object.entries(store)) {
+      const name = storedName.startsWith(SECURE_COOKIE_PREFIX)
+        ? storedName.slice(SECURE_COOKIE_PREFIX.length)
+        : storedName
+      written.add(name)
+      const expiresAtMs = cookie.expires
+        ? new Date(cookie.expires).getTime()
+        : NaN
+      const maxAge = Number.isFinite(expiresAtMs)
+        ? Math.max(0, Math.floor((expiresAtMs - Date.now()) / 1000))
+        : DEFAULT_COOKIE_MAX_AGE
+      document.cookie = `${name}=${cookie.value}; Path=/; SameSite=Lax; Max-Age=${maxAge}`
+    }
+    // Auth cookies dropped from the store must leave the jar too — this is
+    // how crossDomainClient's sign-out wipe and its cleanup after a null
+    // get-session (an expired token the server rejected) reach the browser.
+    // Without it the dead token would be re-read on the next request and the
+    // server would reject it again, forever.
+    for (const [name] of documentCookieEntries()) {
+      if (name.startsWith(BETTER_AUTH_COOKIE_PREFIX) && !written.has(name)) {
+        document.cookie = `${name}=; Path=/; Max-Age=0`
+      }
+    }
+  },
 }

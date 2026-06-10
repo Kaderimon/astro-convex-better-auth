@@ -162,7 +162,7 @@ await authClient.signIn.anonymous()
 await authClient.signUp.email({ name, email, password, callbackURL: "/" })
 ```
 
-> The Convex auth server (`xxx.convex.site`) is on a different origin from your Astro app, so the browser's cross-origin cookie rules block `Set-Cookie` responses from landing in your app's cookie jar. The pre-configured `authClient` includes the `crossDomainClient()` plugin (stores session cookies in `localStorage`) and the `astroConvexClient()` plugin (syncs them to `document.cookie` automatically after every successful auth response). No manual cookie calls are needed.
+> The Convex auth server (`xxx.convex.site`) is on a different origin from your Astro app, so the browser's cross-origin cookie rules block `Set-Cookie` responses from landing in your app's cookie jar. The pre-configured `authClient` includes the `crossDomainClient()` plugin backed by this library's `cookieJarStorage` adapter, which persists the auth cookies it receives directly into `document.cookie` on your app's origin. The browser cookie jar is the single session store shared by client-side requests and the SSR middleware — no sync step or manual cookie calls are needed.
 
 ### Wrapping Convex-authenticated components
 
@@ -224,8 +224,8 @@ This library ships a built-in mechanism to restore anonymous sessions transparen
 1. `restoreAnonymousPlugin()` adds a signed `restoreToken` (`<userId>.<hmac>`, signed with your better-auth secret) to the `/sign-in/anonymous` response. The pre-configured `authClient` automatically writes it into a long-lived browser cookie (`anon_identity`, 1-year `Max-Age`).
 2. Enable `restoreAnonymousSessions: true` in `convexBetterAuthMiddleware`. When no session cookie is found but `anon_identity` is present, the middleware calls the plugin's restore endpoint, which verifies the token's signature and creates a new session for the stored user. The middleware then populates `context.locals` and sets a fresh session cookie — all before any route guard runs.
 3. Register `restoreAnonymousPlugin()` in your Convex auth config to expose the restore endpoint.
-4. On the next client-side auth request, the pre-configured `authClient` adopts the restored session cookie back into the cross-domain `localStorage` store (which is what client requests actually send), so `useSession()` also sees the restored session — no reload or re-login needed.
-5. If the session expires while the page is open (`get-session` starts returning null), the client clears the dead session cookies and calls the restore endpoint itself (rate-limited), so `useSession()` recovers in place without a reload.
+4. Because the auth client reads its session store straight from the browser cookie jar (`cookieJarStorage`), the cookie the middleware sets is immediately visible client-side — `useSession()` sees the restored session on its next fetch with no sync step, reload, or re-login.
+5. If the session expires while the page is open (`get-session` starts returning null), the auth client drops the dead session cookie and the plugin calls the restore endpoint itself (rate-limited), so `useSession()` recovers in place without a reload.
 
 Because the token is HMAC-signed server-side, knowing an anonymous user's ID is not enough to take over their account — only a client that received the original sign-in response can restore the session.
 
@@ -259,7 +259,7 @@ await authClient.signIn.anonymous()
 // the anon_identity cookie is set and cookies are synced automatically
 ```
 
-> If you build a **custom auth client** instead of using the pre-configured one, pass `astroConvexClient({ restoreAnonymousSessions: true })` (default is `false`, symmetric with the middleware option). **Plugin order matters**: `astroConvexClient()` must come *after* `crossDomainClient()` in the plugins array — better-fetch runs plugin hooks in array order, and `astroConvexClient` needs to run after `crossDomainClient` has built the `Better-Auth-Cookie` header and written `localStorage`.
+> If you build a **custom auth client** instead of using the pre-configured one, pass `crossDomainClient({ storage: cookieJarStorage })` (exported from `astro-convex-better-auth/client`) and `astroConvexClient({ restoreAnonymousSessions: true })` (default is `false`, symmetric with the middleware option). **Plugin order matters**: `astroConvexClient()` must come *after* `crossDomainClient()` in the plugins array — better-fetch runs plugin hooks in array order, and `astroConvexClient` inspects the cookie jar expecting `crossDomainClient` to have already applied the response's cookie changes.
 
 **4. Client — sign out**
 

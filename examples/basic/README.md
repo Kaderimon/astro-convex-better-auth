@@ -11,7 +11,7 @@ A minimal Astro app demonstrating `astro-convex-better-auth` with email/password
 | `src/pages/index.astro`          | Home page (authenticated only)                                                         |
 | `src/pages/protected.astro`      | Protected page (authenticated only)                                                    |
 | `src/pages/api/auth/[...all].ts` | Proxies `/api/auth/*` to Convex via `authHandler`                                      |
-| `src/components/AuthForm.tsx`    | React sign-in/sign-up form; calls `syncCookiesToDocument` after auth                   |
+| `src/components/AuthForm.tsx`    | React sign-in/sign-up form using the pre-configured `authClient`                       |
 | `src/components/UserInfo.tsx`    | Displays session info and a sign-out button                                            |
 | `convex/`                        | Convex backend — `@convex-dev/better-auth` component wired up with email/password      |
 | `tests/e2e/`                     | Playwright tests covering redirect, sign-up, sign-in, sign-out flows                   |
@@ -108,4 +108,4 @@ Browser → /api/auth/* ──────────────────�
 
 `convexBetterAuthMiddleware` calls `/api/auth/get-session` on every non-auth request, populates `Astro.locals.user` and `Astro.locals.session`, and strips/re-adds `__Secure-` cookie prefixes so Better Auth's CSRF checks pass across domains.
 
-After a client-side sign-in, `syncCookiesToDocument()` copies the cross-domain cookies that Better Auth stored in `localStorage` back to `document.cookie` so the next SSR request's middleware can read them.
+The pre-configured `authClient` stores the cross-domain auth cookies directly in `document.cookie` (via the `cookieJarStorage` adapter), so the next SSR request's middleware reads the same session the client holds — no sync step needed.

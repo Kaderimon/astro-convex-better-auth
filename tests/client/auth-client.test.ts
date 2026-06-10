@@ -33,6 +33,19 @@ describe("authClient", () => {
     expect(pluginIds).toContain("anonymous")
   })
 
+  it("backs crossDomainClient with the cookie jar storage adapter", async () => {
+    await import("../../client/index")
+
+    expect(crossDomainClientMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        storage: expect.objectContaining({
+          getItem: expect.any(Function),
+          setItem: expect.any(Function),
+        }),
+      }),
+    )
+  })
+
   it("exports createAuthClient result as default", async () => {
     const { default: authClient } = await import("../../client/index")
     expect(authClient).toBe(mockAuthClient)

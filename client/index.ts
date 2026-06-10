@@ -5,13 +5,16 @@ import {
 } from "@convex-dev/better-auth/client/plugins"
 import { anonymousClient } from "better-auth/client/plugins"
 import type { AuthClient } from "@convex-dev/better-auth/react"
+import { cookieJarStorage } from "./cookies"
 import { astroConvexClient } from "./plugin"
 
 const client = createAuthClient({
   baseURL: import.meta.env.PUBLIC_CONVEX_SITE_URL,
   plugins: [
     convexClientPlugin(),
-    crossDomainClient(),
+    // cookieJarStorage makes the browser cookie jar the single session store
+    // shared with the Astro SSR middleware — see its docs.
+    crossDomainClient({ storage: cookieJarStorage }),
     anonymousClient(),
     // Must come after crossDomainClient() — see the astroConvexClient docs.
     astroConvexClient({ restoreAnonymousSessions: true }),
@@ -23,6 +26,6 @@ const client = createAuthClient({
 const authClient = client as typeof client & AuthClient
 
 export default authClient
-export { getCookies, syncCookiesToDocument, setAnonIdentityCookie, clearAnonIdentityCookie } from "./cookies"
+export { cookieJarStorage, setAnonIdentityCookie, clearAnonIdentityCookie } from "./cookies"
 export { astroConvexClient, type AstroConvexClientOptions } from "./plugin"
 export { default as convexClient } from "./convex-client"

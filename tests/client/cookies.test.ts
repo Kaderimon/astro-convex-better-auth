@@ -1,128 +1,15 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
-import {
-  adoptRestoredSessionCookie,
-  buildBetterAuthCookieHeader,
-  clearSessionCookiesFromDocument,
-  getCookies,
-  syncCookiesToDocument,
-} from "../../client/cookies"
+import { cookieJarStorage } from "../../client/cookies"
 
 const FIXED_NOW = new Date("2024-06-01T12:00:00Z")
 const PAST = new Date("2024-05-01T12:00:00Z").toISOString()
-const FUTURE = new Date("2024-07-01T12:00:00Z").toISOString()
-
-describe("getCookies", () => {
-  beforeEach(() => {
-    vi.useFakeTimers()
-    vi.setSystemTime(FIXED_NOW)
-  })
-
-  afterEach(() => {
-    vi.useRealTimers()
-  })
-
-  it("returns empty array for empty string", () => {
-    expect(getCookies("")).toEqual([])
-  })
-
-  it("returns empty array for malformed JSON", () => {
-    expect(getCookies("not-json")).toEqual([])
-  })
-
-  it("returns name=value strings for valid cookie JSON", () => {
-    const raw = JSON.stringify({
-      "my-cookie": { value: "abc", expires: FUTURE },
-    })
-    expect(getCookies(raw)).toEqual(["my-cookie=abc"])
-  })
-
-  it("strips __Secure- prefix from cookie names in the output", () => {
-    const raw = JSON.stringify({
-      "__Secure-better-auth.session_token": { value: "sess123", expires: FUTURE },
-    })
-    const result = getCookies(raw)
-    expect(result).toEqual(["better-auth.session_token=sess123"])
-  })
-
-  it("filters out cookies with an expires date in the past", () => {
-    const raw = JSON.stringify({
-      "stale-cookie": { value: "old", expires: PAST },
-    })
-    expect(getCookies(raw)).toEqual([])
-  })
-
-  it("includes cookies with an expires date in the future", () => {
-    const raw = JSON.stringify({
-      "fresh-cookie": { value: "new", expires: FUTURE },
-    })
-    expect(getCookies(raw)).toEqual(["fresh-cookie=new"])
-  })
-
-  it("includes cookies with expires=null (session cookies)", () => {
-    const raw = JSON.stringify({
-      "session-cookie": { value: "abc", expires: null },
-    })
-    expect(getCookies(raw)).toEqual(["session-cookie=abc"])
-  })
-
-  it("handles multiple cookies, returning all non-expired ones", () => {
-    const raw = JSON.stringify({
-      "fresh-a": { value: "1", expires: FUTURE },
-      "stale-b": { value: "2", expires: PAST },
-      "session-c": { value: "3", expires: null },
-    })
-    const result = getCookies(raw)
-    expect(result).toHaveLength(2)
-    expect(result).toContain("fresh-a=1")
-    expect(result).toContain("session-c=3")
-  })
-})
-
-describe("syncCookiesToDocument", () => {
-  beforeEach(() => {
-    vi.useFakeTimers()
-    vi.setSystemTime(FIXED_NOW)
-    localStorage.clear()
-  })
-
-  afterEach(() => {
-    vi.useRealTimers()
-    localStorage.clear()
-  })
-
-  it("reads 'better-auth_cookie' from localStorage", () => {
-    const getItemSpy = vi.spyOn(Storage.prototype, "getItem")
-    syncCookiesToDocument()
-    expect(getItemSpy).toHaveBeenCalledWith("better-auth_cookie")
-    getItemSpy.mockRestore()
-  })
-
-  it("does not throw when localStorage key is absent", () => {
-    expect(() => syncCookiesToDocument()).not.toThrow()
-  })
-
-  it("sets each valid cookie on document.cookie with correct attributes", () => {
-    const raw = JSON.stringify({
-      "test-cookie": { value: "hello", expires: FUTURE },
-    })
-    localStorage.setItem("better-auth_cookie", raw)
-
-    const cookieSpy = vi.spyOn(document, "cookie", "set")
-    syncCookiesToDocument()
-
-    expect(cookieSpy).toHaveBeenCalledWith(
-      expect.stringContaining("test-cookie=hello"),
-    )
-    expect(cookieSpy).toHaveBeenCalledWith(expect.stringContaining("Path=/"))
-    expect(cookieSpy).toHaveBeenCalledWith(expect.stringContaining("SameSite=Lax"))
-    expect(cookieSpy).toHaveBeenCalledWith(expect.stringContaining("Max-Age=2592000"))
-    cookieSpy.mockRestore()
-  })
-})
+const FUTURE_60S = new Date(FIXED_NOW.getTime() + 60_000).toISOString()
 
 const STORAGE_KEY = "better-auth_cookie"
+const CACHE_KEY = "better-auth_session_data"
 const STORED_TOKEN_KEY = "__Secure-better-auth.session_token"
+const STORED_JWT_KEY = "__Secure-better-auth.convex_jwt"
 
 function clearDocumentCookies() {
   for (const part of document.cookie.split("; ")) {
@@ -131,154 +18,174 @@ function clearDocumentCookies() {
   }
 }
 
-describe("adoptRestoredSessionCookie", () => {
-  beforeEach(() => {
-    vi.useFakeTimers()
-    vi.setSystemTime(FIXED_NOW)
-    localStorage.clear()
-    clearDocumentCookies()
-  })
+beforeEach(() => {
+  vi.useFakeTimers()
+  vi.setSystemTime(FIXED_NOW)
+  localStorage.clear()
+  clearDocumentCookies()
+})
 
-  afterEach(() => {
-    vi.useRealTimers()
-    localStorage.clear()
-    clearDocumentCookies()
-  })
+afterEach(() => {
+  vi.useRealTimers()
+  localStorage.clear()
+  clearDocumentCookies()
+})
 
-  it("returns null when no session cookie is in document.cookie", () => {
-    expect(adoptRestoredSessionCookie()).toBeNull()
-    expect(localStorage.getItem(STORAGE_KEY)).toBeNull()
-  })
+describe("cookieJarStorage.getItem", () => {
+  it("reconstructs the cookie store from better-auth.* document cookies with __Secure- keys", () => {
+    document.cookie = "better-auth.session_token=tok123; Path=/"
+    document.cookie = "better-auth.convex_jwt=jwt456; Path=/"
 
-  it("adopts the cookie into an empty store with expires=null and returns the updated store", () => {
-    document.cookie = "better-auth.session_token=restored123; Path=/"
+    const store = JSON.parse(cookieJarStorage.getItem(STORAGE_KEY)!)
 
-    const adopted = adoptRestoredSessionCookie()
-
-    expect(adopted?.[STORED_TOKEN_KEY]).toEqual({
-      value: "restored123",
-      expires: null,
+    expect(store).toEqual({
+      [STORED_TOKEN_KEY]: { value: "tok123", expires: null },
+      [STORED_JWT_KEY]: { value: "jwt456", expires: null },
     })
-    const stored = JSON.parse(localStorage.getItem(STORAGE_KEY)!)
-    expect(stored).toEqual(adopted)
   })
 
-  it("returns null when the store already holds the same valid token", () => {
-    document.cookie = "better-auth.session_token=same; Path=/"
-    localStorage.setItem(
-      STORAGE_KEY,
-      JSON.stringify({ [STORED_TOKEN_KEY]: { value: "same", expires: FUTURE } }),
-    )
+  it("ignores document cookies outside the better-auth prefix", () => {
+    document.cookie = "anon_identity=u1.sig; Path=/"
+    document.cookie = "unrelated=x; Path=/"
 
-    expect(adoptRestoredSessionCookie()).toBeNull()
+    expect(cookieJarStorage.getItem(STORAGE_KEY)).toBe("{}")
   })
 
-  it("overwrites a differing stored token", () => {
-    document.cookie = "better-auth.session_token=fresh; Path=/"
-    localStorage.setItem(
-      STORAGE_KEY,
-      JSON.stringify({ [STORED_TOKEN_KEY]: { value: "stale", expires: FUTURE } }),
-    )
-
-    expect(adoptRestoredSessionCookie()?.[STORED_TOKEN_KEY].value).toBe("fresh")
-    const stored = JSON.parse(localStorage.getItem(STORAGE_KEY)!)
-    expect(stored[STORED_TOKEN_KEY].value).toBe("fresh")
+  it("returns an empty store when the jar is empty", () => {
+    expect(cookieJarStorage.getItem(STORAGE_KEY)).toBe("{}")
   })
 
-  it("re-adopts when the stored entry has expired, even with the same value", () => {
-    document.cookie = "better-auth.session_token=tok; Path=/"
-    localStorage.setItem(
-      STORAGE_KEY,
-      JSON.stringify({ [STORED_TOKEN_KEY]: { value: "tok", expires: PAST } }),
-    )
+  it("reads non-store keys from localStorage", () => {
+    localStorage.setItem(CACHE_KEY, '{"user":{"id":"u1"}}')
 
-    expect(adoptRestoredSessionCookie()).not.toBeNull()
-    const stored = JSON.parse(localStorage.getItem(STORAGE_KEY)!)
-    expect(stored[STORED_TOKEN_KEY]).toEqual({ value: "tok", expires: null })
-  })
-
-  it("preserves other entries in the store", () => {
-    document.cookie = "better-auth.session_token=tok; Path=/"
-    localStorage.setItem(
-      STORAGE_KEY,
-      JSON.stringify({ other: { value: "keep", expires: null } }),
-    )
-
-    adoptRestoredSessionCookie()
-
-    const stored = JSON.parse(localStorage.getItem(STORAGE_KEY)!)
-    expect(stored.other).toEqual({ value: "keep", expires: null })
+    expect(cookieJarStorage.getItem(CACHE_KEY)).toBe('{"user":{"id":"u1"}}')
+    expect(cookieJarStorage.getItem("missing")).toBeNull()
   })
 })
 
-describe("buildBetterAuthCookieHeader", () => {
-  beforeEach(() => {
-    vi.useFakeTimers()
-    vi.setSystemTime(FIXED_NOW)
-    localStorage.clear()
-  })
-
-  afterEach(() => {
-    vi.useRealTimers()
-    localStorage.clear()
-  })
-
-  it("returns empty string for an empty store", () => {
-    expect(buildBetterAuthCookieHeader()).toBe("")
-  })
-
-  it("keeps the __Secure- prefix and joins entries with '; '", () => {
-    localStorage.setItem(
+describe("cookieJarStorage.setItem", () => {
+  it("writes each store entry as a document cookie without the __Secure- prefix", () => {
+    cookieJarStorage.setItem(
       STORAGE_KEY,
       JSON.stringify({
-        [STORED_TOKEN_KEY]: { value: "tok", expires: null },
-        "__Secure-better-auth.convex_jwt": { value: "jwt", expires: FUTURE },
+        [STORED_TOKEN_KEY]: { value: "tok123", expires: null },
+        [STORED_JWT_KEY]: { value: "jwt456", expires: null },
       }),
     )
 
-    expect(buildBetterAuthCookieHeader()).toBe(
-      `${STORED_TOKEN_KEY}=tok; __Secure-better-auth.convex_jwt=jwt`,
-    )
+    expect(document.cookie).toContain("better-auth.session_token=tok123")
+    expect(document.cookie).toContain("better-auth.convex_jwt=jwt456")
   })
 
-  it("filters out expired entries", () => {
-    localStorage.setItem(
-      STORAGE_KEY,
-      JSON.stringify({
-        fresh: { value: "a", expires: FUTURE },
-        stale: { value: "b", expires: PAST },
-      }),
-    )
-
-    expect(buildBetterAuthCookieHeader()).toBe("fresh=a")
-  })
-
-  it("uses a pre-parsed store when one is passed, ignoring localStorage", () => {
-    localStorage.setItem(
-      STORAGE_KEY,
-      JSON.stringify({ ignored: { value: "x", expires: null } }),
-    )
-
-    expect(
-      buildBetterAuthCookieHeader({
-        [STORED_TOKEN_KEY]: { value: "tok", expires: null },
-      }),
-    ).toBe(`${STORED_TOKEN_KEY}=tok`)
-  })
-})
-
-describe("clearSessionCookiesFromDocument", () => {
-  it("expires the session_token and convex_jwt cookies", () => {
+  it("derives Max-Age from the entry's expires timestamp", () => {
     const cookieSpy = vi.spyOn(document, "cookie", "set")
 
-    clearSessionCookiesFromDocument()
+    cookieJarStorage.setItem(
+      STORAGE_KEY,
+      JSON.stringify({
+        [STORED_TOKEN_KEY]: { value: "tok", expires: FUTURE_60S },
+      }),
+    )
 
     expect(cookieSpy).toHaveBeenCalledWith(
-      "better-auth.session_token=; Path=/; Max-Age=0",
-    )
-    expect(cookieSpy).toHaveBeenCalledWith(
-      "better-auth.convex_jwt=; Path=/; Max-Age=0",
+      "better-auth.session_token=tok; Path=/; SameSite=Lax; Max-Age=60",
     )
     cookieSpy.mockRestore()
+  })
+
+  it("falls back to a 30-day Max-Age when expires is null", () => {
+    const cookieSpy = vi.spyOn(document, "cookie", "set")
+
+    cookieJarStorage.setItem(
+      STORAGE_KEY,
+      JSON.stringify({
+        [STORED_TOKEN_KEY]: { value: "tok", expires: null },
+      }),
+    )
+
+    expect(cookieSpy).toHaveBeenCalledWith(
+      "better-auth.session_token=tok; Path=/; SameSite=Lax; Max-Age=2592000",
+    )
+    cookieSpy.mockRestore()
+  })
+
+  it("writes already-expired entries with Max-Age=0, removing them from the jar", () => {
+    document.cookie = "better-auth.session_token=old; Path=/"
+
+    cookieJarStorage.setItem(
+      STORAGE_KEY,
+      JSON.stringify({
+        [STORED_TOKEN_KEY]: { value: "old", expires: PAST },
+      }),
+    )
+
+    expect(document.cookie).not.toContain("better-auth.session_token")
+  })
+
+  it("deletes better-auth.* cookies that were dropped from the store", () => {
+    // The mechanism behind crossDomainClient's sign-out wipe and its cleanup
+    // after a null get-session: entries missing from the written store must
+    // leave the jar, or the dead token would be re-sent forever.
+    document.cookie = "better-auth.session_token=dead; Path=/"
+    document.cookie = "better-auth.convex_jwt=stale; Path=/"
+
+    cookieJarStorage.setItem(STORAGE_KEY, "{}")
+
+    expect(document.cookie).not.toContain("better-auth.session_token")
+    expect(document.cookie).not.toContain("better-auth.convex_jwt")
+  })
+
+  it("leaves cookies outside the better-auth prefix alone", () => {
+    document.cookie = "anon_identity=u1.sig; Path=/"
+    document.cookie = "better-auth.session_token=dead; Path=/"
+
+    cookieJarStorage.setItem(STORAGE_KEY, "{}")
+
+    expect(document.cookie).toContain("anon_identity=u1.sig")
+  })
+
+  it("tolerates malformed store JSON by clearing better-auth cookies only", () => {
+    document.cookie = "better-auth.session_token=tok; Path=/"
+    document.cookie = "anon_identity=u1.sig; Path=/"
+
+    cookieJarStorage.setItem(STORAGE_KEY, "not-json")
+
+    expect(document.cookie).not.toContain("better-auth.session_token")
+    expect(document.cookie).toContain("anon_identity=u1.sig")
+  })
+
+  it("writes non-store keys to localStorage", () => {
+    cookieJarStorage.setItem(CACHE_KEY, '{"user":{"id":"u1"}}')
+
+    expect(localStorage.getItem(CACHE_KEY)).toBe('{"user":{"id":"u1"}}')
+    expect(document.cookie).toBe("")
+  })
+})
+
+describe("cookieJarStorage round-trip", () => {
+  it("getItem returns what setItem wrote (values preserved, expires reported as null)", () => {
+    cookieJarStorage.setItem(
+      STORAGE_KEY,
+      JSON.stringify({
+        [STORED_TOKEN_KEY]: { value: "tok123", expires: FUTURE_60S },
+        [STORED_JWT_KEY]: { value: "jwt456", expires: null },
+      }),
+    )
+
+    const store = JSON.parse(cookieJarStorage.getItem(STORAGE_KEY)!)
+    expect(store).toEqual({
+      [STORED_TOKEN_KEY]: { value: "tok123", expires: null },
+      [STORED_JWT_KEY]: { value: "jwt456", expires: null },
+    })
+  })
+
+  it("a session cookie set by the middleware is visible to the store without any sync step", () => {
+    // What previously required adoptRestoredSessionCookie(): the middleware's
+    // server-side restore only sets a document cookie, and the auth client
+    // now reads it directly.
+    document.cookie = "better-auth.session_token=restored-by-middleware; Path=/"
+
+    const store = JSON.parse(cookieJarStorage.getItem(STORAGE_KEY)!)
+    expect(store[STORED_TOKEN_KEY].value).toBe("restored-by-middleware")
   })
 })

@@ -11,11 +11,18 @@ export const ANON_IDENTITY_COOKIE = "anon_identity"
  */
 export const RESTORE_ANONYMOUS_SESSION_PATH = "/restore-anonymous-session"
 
+/**
+ * Name prefix shared by every cookie better-auth issues (its default
+ * `cookiePrefix`). `cookieJarStorage` uses it to tell which document cookies
+ * belong to the auth store.
+ */
+export const BETTER_AUTH_COOKIE_PREFIX = "better-auth."
+
 /** better-auth's session token cookie (unprefixed form used on the Astro origin). */
-export const SESSION_TOKEN_COOKIE = "better-auth.session_token"
+export const SESSION_TOKEN_COOKIE = `${BETTER_AUTH_COOKIE_PREFIX}session_token`
 
 /** Convex JWT cookie set by @convex-dev/better-auth (unprefixed form). */
-export const CONVEX_JWT_COOKIE = "better-auth.convex_jwt"
+export const CONVEX_JWT_COOKIE = `${BETTER_AUTH_COOKIE_PREFIX}convex_jwt`
 
 /**
  * Prefix the Convex backend (served over https) applies to its cookies.

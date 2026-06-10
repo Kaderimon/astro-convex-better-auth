@@ -5,3 +5,7 @@ packages:
 # Supply-chain hardening
 minimumReleaseAge: 4320 # minutes (3 days) — don't resolve versions published more recently
 strictDepBuilds: true # fail install if a dep wants build scripts that aren't allowlisted
+# Build scripts we deliberately skip — both ship prebuilt binaries via optionalDependencies
+ignoredBuiltDependencies:
+  - esbuild
+  - sharp

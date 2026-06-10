@@ -34,9 +34,24 @@ jobs:
       - run: pnpm build
 
       - name: Create release PR or publish to npm
+        id: changesets
         uses: changesets/action@v1
         with:
           version: pnpm changeset version
           publish: pnpm changeset publish
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Add npm link to GitHub release
+        if: steps.changesets.outputs.published == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          echo '${{ steps.changesets.outputs.publishedPackages }}' | jq -c '.[]' | while read -r pkg; do
+            name=$(jq -r .name <<<"$pkg")
+            version=$(jq -r .version <<<"$pkg")
+            # changesets tags single-package repos as v<version>
+            tag="v$version"
+            notes=$(gh release view "$tag" --json body -q .body)
+            gh release edit "$tag" --notes "$notes"$'\n\n'"📦 [\`$name@$version\` on npm](https://www.npmjs.com/package/$name/v/$version)"
+          done

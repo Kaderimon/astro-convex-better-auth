@@ -1,5 +1,8 @@
 # astro-convex-better-auth
 
+[![npm version](https://img.shields.io/npm/v/astro-convex-better-auth)](https://www.npmjs.com/package/astro-convex-better-auth)
+[![CI](https://github.com/Kaderimon/astro-convex-better-auth/actions/workflows/ci.yml/badge.svg)](https://github.com/Kaderimon/astro-convex-better-auth/actions/workflows/ci.yml)
+
 A thin Astro integration that wires [`@convex-dev/better-auth`](https://github.com/get-convex/better-auth) into an Astro SSR project. It provides:
 
 - An **Astro integration** that injects env variables and a virtual config module

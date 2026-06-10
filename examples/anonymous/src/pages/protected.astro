@@ -1,0 +1,20 @@
+---
+const user = Astro.locals.user!
+---
+
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Protected — astro-convex-better-auth example</title>
+  </head>
+  <body>
+    <main>
+      <h2>Protected page</h2>
+      <p>Only authenticated users can see this.</p>
+      <p>Logged in as: <strong>{user.name}</strong> ({user.email})</p>
+      <p><a href="/">← Home</a></p>
+    </main>
+  </body>
+</html>

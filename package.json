@@ -37,7 +37,8 @@
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
     "example:dev": "pnpm --filter examples-basic dev",
-    "example:build": "pnpm build && pnpm --filter examples-basic build"
+    "example:build": "pnpm build && pnpm --filter './examples/*' build",
+    "example:test:e2e": "pnpm --filter './examples/*' test:e2e"
   },
   "keywords": [
     "auth",

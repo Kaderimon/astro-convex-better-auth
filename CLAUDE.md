@@ -13,8 +13,16 @@ pnpm build           # bundle with tsdown → dist/
 pnpm test            # vitest suite (tests/)
 pnpm test:watch      # vitest in watch mode
 pnpm test:coverage   # vitest with v8 coverage
-pnpm example:build   # build the library, then examples/basic
+pnpm example:build   # build the library, then all examples/*
 ```
+
+## Examples
+
+Three feature-tiered example apps live in `examples/`, each with its own Convex backend and Playwright e2e suite (`pnpm --filter <name> test:e2e`):
+
+- `examples/basic` — email/password only: `cookieJarStorage` + middleware.
+- `examples/anonymous` — adds anonymous (guest) sign-in; expired guest sessions are lost.
+- `examples/anonymous-restore` — adds the restore plugins on all three layers; guest identity survives session expiry.
 
 ## Architecture
 
@@ -45,7 +53,7 @@ Cookies forwarded to Convex: `better-auth.convex_jwt` and `better-auth.session_t
 
 ### 3. Client building blocks (`client/`)
 
-No pre-configured client is exported — consumers compose their own `createAuthClient()` (see the README recipe; `examples/basic/src/lib/auth-client.ts` is the living reference). Exports from `astro-convex-better-auth/client`:
+No pre-configured client is exported — consumers compose their own `createAuthClient()` (see the README recipe; `examples/anonymous-restore/src/lib/auth-client.ts` is the living reference for the full recipe; `examples/basic` and `examples/anonymous` show the smaller tiers). Exports from `astro-convex-better-auth/client`:
 
 - **`cookieJarStorage`** — storage adapter for `crossDomainClient()` that backs the auth cookie store with `document.cookie` instead of localStorage, making the browser cookie jar the single session store shared with the SSR middleware.
 - **`restoreAnonymousSessionClient()`** — client plugin for anonymous session restoration: stores the signed `restoreToken` in the `anon_identity` cookie, clears it on sign-out, and calls the restore endpoint when `get-session` goes null. Takes no options (registering it is the opt-in); must come *after* `crossDomainClient()` in the plugins array.

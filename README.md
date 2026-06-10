@@ -325,6 +325,18 @@ betterAuth({
 
 ---
 
+## Examples
+
+Three feature-tiered example apps live in [`examples/`](examples), each a complete Astro + Convex app with its own Playwright e2e suite:
+
+| Example | Adds | Use it when |
+| --- | --- | --- |
+| [`examples/basic`](examples/basic) | `cookieJarStorage` + SSR middleware, email/password auth | You just want sessions shared between client and SSR |
+| [`examples/anonymous`](examples/anonymous) | anonymous (guest) sign-in | You want guest users; losing the guest identity at session expiry is acceptable |
+| [`examples/anonymous-restore`](examples/anonymous-restore) | the `restoreAnonymousSession*` plugins on client, middleware, and Convex | Guest identity must survive session expiry |
+
+---
+
 ## How it works
 
 > **Internals** — not required reading for normal use.

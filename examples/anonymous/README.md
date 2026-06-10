@@ -1,23 +1,23 @@
-# examples/basic
+# examples/anonymous
 
-A minimal Astro app demonstrating `astro-convex-better-auth` with email/password authentication, server-side session checks via the Astro middleware, and the `cookieJarStorage` adapter that makes the browser cookie jar the single session store shared between client and SSR.
+A minimal Astro app demonstrating `astro-convex-better-auth` with email/password **and anonymous (guest) authentication**, server-side session checks, and a protected route.
 
-This is the smallest tier. For anonymous (guest) sign-in see [`examples/anonymous`](../anonymous); for guest sessions that survive expiry see [`examples/anonymous-restore`](../anonymous-restore).
+Builds on [`examples/basic`](../basic) by adding the better-auth `anonymous` plugin. Note that an expired anonymous session is simply gone — the guest is sent back to `/auth` and gets a brand-new identity next time. If you want guest sessions to survive expiry, see [`examples/anonymous-restore`](../anonymous-restore).
 
 ## What's included
 
 | Path                             | Purpose                                                                                |
 | -------------------------------- | -------------------------------------------------------------------------------------- |
 | `src/middleware.ts`              | `convexBetterAuthMiddleware` + auth guard (redirects unauthenticated users to `/auth`) |
-| `src/pages/auth.astro`           | Sign-in / sign-up page                                                                 |
+| `src/pages/auth.astro`           | Sign-in / sign-up page with a "Continue as Guest" button                               |
 | `src/pages/index.astro`          | Home page (authenticated only)                                                         |
 | `src/pages/protected.astro`      | Protected page (authenticated only)                                                    |
 | `src/pages/api/auth/[...all].ts` | Proxies `/api/auth/*` to Convex via `authHandler`                                      |
-| `src/lib/auth-client.ts`         | The composed better-auth client with `cookieJarStorage`                                |
+| `src/lib/auth-client.ts`         | The composed better-auth client (`cookieJarStorage` + `anonymousClient`)               |
 | `src/components/AuthForm.tsx`    | React sign-in/sign-up form using the auth client                                       |
 | `src/components/UserInfo.tsx`    | Displays session info and a sign-out button                                            |
-| `convex/`                        | Convex backend — `@convex-dev/better-auth` component wired up with email/password      |
-| `tests/e2e/`                     | Playwright tests covering redirect, sign-up, sign-in, sign-out flows                   |
+| `convex/`                        | Convex backend — `@convex-dev/better-auth` component with the `anonymous()` plugin    |
+| `tests/e2e/`                     | Playwright tests covering auth flows and the anonymous session lifecycle               |
 
 ## Prerequisites
 
@@ -38,7 +38,7 @@ pnpm build          # build the library → dist/
 **2. Deploy the Convex backend:**
 
 ```bash
-cd examples/basic
+cd examples/anonymous
 pnpm dlx convex dev --once
 ```
 
@@ -78,7 +78,7 @@ pnpm convex:dev
 pnpm dev
 ```
 
-Open [http://localhost:4321](http://localhost:4321). You will be redirected to `/auth` since you are not signed in. Create an account, sign in, and you'll land on the home page with access to `/protected`.
+Open [http://localhost:4321](http://localhost:4321). You will be redirected to `/auth`. Sign up with email/password or click **Continue as Guest** to get an anonymous session.
 
 ## E2E tests
 
@@ -100,8 +100,17 @@ Playwright must be able to reach the running dev server (`http://localhost:4321`
 - Sign-up with email/password
 - Sign-in with existing credentials
 - Sign-out
-- Session persistence across reloads (cookie jar shared between client and SSR)
+- Anonymous (guest) sign-in
+- Anonymous session persistence across reloads within the expiry window
+- Anonymous session loss after expiry (the gap `examples/anonymous-restore` fills)
 - Redirect away from `/auth` when already signed in
+
+The expiry test self-skips unless the Convex deployment uses a short session lifetime. To exercise it:
+
+```bash
+pnpm dlx convex env set SESSION_EXPIRES_IN 30
+pnpm dlx convex env set SESSION_UPDATE_AGE 10
+```
 
 ## How it works
 
@@ -113,3 +122,5 @@ Browser → /api/auth/* ──────────────────�
 `convexBetterAuthMiddleware` calls `/api/auth/get-session` on every non-auth request, populates `Astro.locals.user` and `Astro.locals.session`, and strips/re-adds `__Secure-` cookie prefixes so Better Auth's CSRF checks pass across domains.
 
 The auth client (`src/lib/auth-client.ts`) stores the cross-domain auth cookies directly in `document.cookie` (via the `cookieJarStorage` adapter), so the next SSR request's middleware reads the same session the client holds — no sync step needed.
+
+Anonymous sign-in (`authClient.signIn.anonymous()`) creates a real user with `isAnonymous: true` and a normal session cookie, so guests pass the same middleware checks as registered users. While the cookie is valid the guest keeps their identity across visits; once the session expires there is no way to recover it (that's what the `restoreAnonymousSession*` plugins in `examples/anonymous-restore` add).

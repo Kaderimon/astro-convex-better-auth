@@ -25,6 +25,6 @@ const authGuard = defineMiddleware((context, next) => {
 })
 
 export const onRequest = sequence(
-  defineMiddleware(convexBetterAuthMiddleware()),
+  defineMiddleware(convexBetterAuthMiddleware({ restoreAnonymousSessions: true })),
   authGuard,
 )

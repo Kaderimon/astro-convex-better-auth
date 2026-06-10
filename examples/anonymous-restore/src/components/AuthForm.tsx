@@ -11,6 +11,23 @@ export default function AuthForm() {
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
 
+  const handleAnonymousSignIn = async () => {
+    setError(null)
+    setLoading(true)
+    try {
+      const { error: err } = await authClient.signIn.anonymous()
+      if (err) {
+        setError(err.message ?? "Anonymous sign in failed")
+        return
+      }
+      window.location.href = "/"
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "An error occurred")
+    } finally {
+      setLoading(false)
+    }
+  }
+
   const handleSubmit = async (e: React.SubmitEvent<HTMLFormElement>) => {
     e.preventDefault()
     setError(null)
@@ -115,6 +132,11 @@ export default function AuthForm() {
           {loading ? "Loading..." : mode === "signin" ? "Sign In" : "Sign Up"}
         </button>
       </form>
+
+      <hr style={{ margin: "1.5rem 0", maxWidth: "320px" }} />
+      <button onClick={handleAnonymousSignIn} disabled={loading}>
+        Continue as Guest
+      </button>
     </div>
   )
 }

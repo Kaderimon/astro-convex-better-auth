@@ -38,7 +38,9 @@
     "test:coverage": "vitest run --coverage",
     "example:dev": "pnpm --filter examples-basic dev",
     "example:build": "pnpm build && pnpm --filter './examples/*' build",
-    "example:test:e2e": "pnpm --filter './examples/*' test:e2e"
+    "example:test:e2e": "pnpm --filter './examples/*' test:e2e",
+    "changeset": "changeset",
+    "release": "pnpm build && changeset publish"
   },
   "keywords": [
     "auth",
@@ -49,13 +51,27 @@
     "convex",
     "typescript"
   ],
-  "author": "",
+  "author": "Mykyta Shupyliuk",
   "type": "module",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Kaderimon/astro-convex-better-auth.git"
+  },
+  "homepage": "https://github.com/Kaderimon/astro-convex-better-auth#readme",
+  "bugs": {
+    "url": "https://github.com/Kaderimon/astro-convex-better-auth/issues"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "packageManager": "pnpm@10.18.3",
   "dependencies": {
     "zod": "^4.3.6"
   },
   "devDependencies": {
+    "@changesets/changelog-github": "^0.7.0",
+    "@changesets/cli": "^2.31.0",
     "@convex-dev/better-auth": "^0.12.2",
     "@vitest/coverage-v8": "^4.1.8",
     "astro": "^6.4.4",

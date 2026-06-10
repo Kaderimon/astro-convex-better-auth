@@ -1,0 +1,85 @@
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build
+      - run: pnpm test
+
+  e2e:
+    needs: test
+    # Fork PRs have no access to secrets, so the Convex-backed suites can't run there.
+    if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    # All examples share one cloud Convex dev deployment: examples run
+    # sequentially below, and workflow runs must not overlap each other.
+    concurrency:
+      group: e2e-shared-convex
+      cancel-in-progress: false
+    env:
+      CONVEX_DEPLOY_KEY: ${{ secrets.CONVEX_DEPLOY_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build
+
+      - name: Install Playwright browsers
+        run: pnpm --filter examples-basic exec playwright install --with-deps chromium
+
+      - name: Write example envs
+        run: |
+          for example in basic anonymous anonymous-restore; do
+            cat > "examples/$example/.env.local" <<EOF
+          PUBLIC_CONVEX_URL=${{ vars.PUBLIC_CONVEX_URL }}
+          PUBLIC_CONVEX_SITE_URL=${{ vars.PUBLIC_CONVEX_SITE_URL }}
+          SITE_URL=http://localhost:4321
+          BETTER_AUTH_SECRET=${{ secrets.BETTER_AUTH_SECRET }}
+          EOF
+          done
+
+      - name: e2e basic
+        working-directory: examples/basic
+        run: |
+          npx convex dev --once
+          pnpm test:e2e
+
+      - name: e2e anonymous
+        working-directory: examples/anonymous
+        run: |
+          npx convex dev --once
+          pnpm test:e2e
+
+      - name: e2e anonymous-restore
+        working-directory: examples/anonymous-restore
+        run: |
+          npx convex dev --once
+          pnpm test:e2e
+
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: playwright-report
+          path: examples/*/playwright-report/
+          retention-days: 7

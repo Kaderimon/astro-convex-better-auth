@@ -18,10 +18,6 @@
       "import": "./dist/client/index.mjs",
       "types": "./dist/client/index.d.mts"
     },
-    "./server/middleware-entrypoint": {
-      "import": "./dist/server/middleware-entrypoint.mjs",
-      "types": "./dist/server/middleware-entrypoint.d.mts"
-    },
     "./plugins": {
       "import": "./dist/plugins.mjs",
       "types": "./dist/plugins.d.mts"

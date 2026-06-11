@@ -34,7 +34,7 @@ The library has four layers that consumers use together:
 - Validates that server/hybrid output modes have an adapter configured.
 - Injects `PUBLIC_CONVEX_SITE_URL` and `PUBLIC_CONVEX_URL` into Vite's `define` if passed as options (overrides).
 - Registers Astro's typed env schema for four env vars (can be disabled via `enableEnvSchema: false`).
-- Adds a Vite plugin (`vitePluginAstroConfig`) that exposes the virtual module `virtual:@convex-better-auth/astro/config`.
+- Adds a Vite plugin (`vitePluginAstroConfig`) that exposes two virtual modules: `virtual:@convex-better-auth/astro/config` and (for `autoMiddleware`) `virtual:@convex-better-auth/middleware`. The middleware entrypoint is virtual on purpose — no published file imports `virtual:`/`astro:` specifiers, so Vite's dep optimizer can pre-bundle the package and consumers never need `optimizeDeps.exclude`.
 
 The virtual module exports `isStaticOutput(forceStatic?)`, which lets server-side code check the Astro output mode at runtime without importing Astro config directly.
 
@@ -48,7 +48,7 @@ The virtual module exports `isStaticOutput(forceStatic?)`, which lets server-sid
   - Populates `context.locals.user`, `context.locals.session`, and (with `includeConvexToken: true`) `context.locals.convexToken`.
   - Propagates session cookies that better-auth refreshed during `get-session` (the `Set-Better-Auth-Cookie` response header) back to the browser, so sliding-session refresh extends the browser cookie's Max-Age.
   - With `restoreAnonymousSessions: true`, restores expired anonymous sessions from the `anon_identity` cookie via the restore endpoint (see layer 4).
-  - Can be auto-injected by the integration via the `autoMiddleware` option (uses `server/middleware-entrypoint.ts`).
+  - Can be auto-injected by the integration via the `autoMiddleware` option (uses the `virtual:@convex-better-auth/middleware` virtual module, served by `vitePluginAstroConfig`).
 
 Cookies forwarded to Convex: `better-auth.convex_jwt` and `better-auth.session_token` (re-prefixed as `__Secure-*`). Cookie names and endpoint paths shared between client and server live in `shared/constants.ts`.
 

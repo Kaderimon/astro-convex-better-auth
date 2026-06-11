@@ -7,6 +7,8 @@ function makePlugin(output: string, middlewareOptions?: Record<string, unknown>)
 
 const VIRTUAL_ID = "virtual:@convex-better-auth/astro/config"
 const RESOLVED_ID = "\0" + VIRTUAL_ID
+const MIDDLEWARE_VIRTUAL_ID = "virtual:@convex-better-auth/middleware"
+const RESOLVED_MIDDLEWARE_ID = "\0" + MIDDLEWARE_VIRTUAL_ID
 
 function getIsStaticOutput(output: string, forceStatic?: boolean): boolean {
   const plugin = makePlugin(output)
@@ -42,6 +44,13 @@ describe("vitePluginAstroConfig", () => {
       expect(resolveId(VIRTUAL_ID)).toBe(RESOLVED_ID)
     })
 
+    it("resolves the virtual middleware module id to the prefixed internal id", () => {
+      const plugin = makePlugin("server")
+      const resolveId = plugin.resolveId as (id: string) => string | undefined
+
+      expect(resolveId(MIDDLEWARE_VIRTUAL_ID)).toBe(RESOLVED_MIDDLEWARE_ID)
+    })
+
     it("returns undefined for unrecognized module ids", () => {
       const plugin = makePlugin("server")
       const resolveId = plugin.resolveId as (id: string) => string | undefined
@@ -65,24 +74,48 @@ describe("vitePluginAstroConfig", () => {
       expect(typeof load(RESOLVED_ID)).toBe("string")
     })
 
-    it("serializes middlewareOptions into the module string", () => {
+    it("does not embed middlewareOptions in the config module", () => {
       const opts = { includeConvexToken: true, restoreAnonymousSessions: false }
       const plugin = makePlugin("server", opts)
       const load = plugin.load as (id: string) => string | undefined
 
       const code = load(RESOLVED_ID)!
 
-      expect(code).toContain(JSON.stringify(opts))
+      expect(code).not.toContain("middlewareOptions")
     })
 
-    it("serializes null when middlewareOptions is undefined", () => {
-      const plugin = makePlugin("server", undefined)
-      const load = plugin.load as (id: string) => string | undefined
+    describe("virtual middleware module", () => {
+      it("serializes middlewareOptions into the module string", () => {
+        const opts = { includeConvexToken: true, restoreAnonymousSessions: false }
+        const plugin = makePlugin("server", opts)
+        const load = plugin.load as (id: string) => string | undefined
 
-      const code = load(RESOLVED_ID)!
+        const code = load(RESOLVED_MIDDLEWARE_ID)!
 
-      // undefined middlewareOptions → JSON.stringify(null) → "null"
-      expect(code).toContain("null")
+        expect(code).toContain(JSON.stringify(opts))
+      })
+
+      it("defaults to empty options when middlewareOptions is undefined", () => {
+        const plugin = makePlugin("server", undefined)
+        const load = plugin.load as (id: string) => string | undefined
+
+        const code = load(RESOLVED_MIDDLEWARE_ID)!
+
+        expect(code).toContain("convexBetterAuthMiddleware({})")
+      })
+
+      it("imports the middleware from the package's server entry and exports onRequest", () => {
+        const plugin = makePlugin("server")
+        const load = plugin.load as (id: string) => string | undefined
+
+        const code = load(RESOLVED_MIDDLEWARE_ID)!
+
+        expect(code).toContain('from "astro-convex-better-auth/server"')
+        expect(code).toContain("export const onRequest")
+        // Keep the module free of specifiers the dep optimizer can't resolve.
+        expect(code).not.toContain("astro:middleware")
+        expect(code).not.toContain("virtual:")
+      })
     })
 
     describe("isStaticOutput logic", () => {

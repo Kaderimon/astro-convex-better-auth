@@ -5,7 +5,6 @@ export default defineConfig({
     "index.ts",
     "plugins.ts",
     "server/index.ts",
-    "server/middleware-entrypoint.ts",
     "client/index.ts",
   ],
   format: "esm",

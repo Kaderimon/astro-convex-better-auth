@@ -113,6 +113,22 @@ describe("createIntegration", () => {
       )
     })
 
+    it("uses the virtual middleware module as the entrypoint", () => {
+      const integration = createIntegration()({ autoMiddleware: true })
+      const ctx = makeSetupContext()
+
+      runSetupHook(integration, ctx)
+
+      // A published-file entrypoint would be pre-bundled by the dep optimizer
+      // (plain esbuild, no Vite plugins) and fail on virtual imports, forcing
+      // consumers to add optimizeDeps.exclude. The entrypoint must stay virtual.
+      expect(ctx.addMiddleware).toHaveBeenCalledWith(
+        expect.objectContaining({
+          entrypoint: "virtual:@convex-better-auth/middleware",
+        }),
+      )
+    })
+
     it("calls addMiddleware when autoMiddleware is an options object", () => {
       const integration = createIntegration()({
         autoMiddleware: { includeConvexToken: true },

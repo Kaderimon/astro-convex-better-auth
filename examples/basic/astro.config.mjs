@@ -23,6 +23,9 @@ export default defineConfig({
     convexBetterAuth({
       siteUrl: process.env.CONVEX_SITE_URL,
       convexUrl: process.env.CONVEX_URL,
+      // Injects convexBetterAuthMiddleware ahead of src/middleware.ts, so the
+      // app only ships its own auth guard.
+      autoMiddleware: true,
     }),
   ],
   vite: {

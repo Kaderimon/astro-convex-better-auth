@@ -17,6 +17,15 @@ type AuthFetch = (
   options: { method: string; body: Record<string, string> },
 ) => Promise<{ error: { status: number } | null }>
 
+// Structural supertype of better-fetch's onSuccess context. Annotated locally
+// (instead of relying on contextual typing) so the inferred plugin type that
+// lands in the published .d.ts never references better-auth/better-fetch
+// types — see the note on the return type of restoreAnonymousSessionClient.
+type FetchSuccessContext = {
+  data: unknown
+  request: { url: string | URL; headers?: unknown }
+}
+
 // Minimum gap between client-side restore attempts, so a backend that keeps
 // rejecting fresh sessions cannot turn the retry into a tight loop.
 const RESTORE_RETRY_MS = 5_000
@@ -72,8 +81,16 @@ function sentSessionToken(request: { headers?: unknown }): string | null {
  * `crossDomainClient` attaches the `Better-Auth-Cookie` header, persists the
  * fresh session cookie from the response, and notifies `$sessionSignal` so
  * `useSession()` refetches — no manual store writes needed.
+ *
+ * The return type is deliberately the inferred structural literal (checked via
+ * `satisfies`), not the `BetterAuthClientPlugin` interface: annotating the
+ * interface would pin the published .d.ts to one better-auth version, and a
+ * consumer whose tree resolves a second `@better-auth/core` copy would get a
+ * cross-version interface-to-interface assignability error in
+ * `createAuthClient({ plugins })`. The structural literal stays assignable to
+ * every version's interface.
  */
-export function restoreAnonymousSessionClient(): BetterAuthClientPlugin {
+export function restoreAnonymousSessionClient() {
   // Captured in getActions.
   let authFetch: AuthFetch | null = null
   let restoreInFlight = false
@@ -122,8 +139,8 @@ export function restoreAnonymousSessionClient(): BetterAuthClientPlugin {
 
   return {
     id: "restore-anonymous-session",
-    getActions: ($fetch) => {
-      authFetch = $fetch as unknown as AuthFetch
+    getActions: ($fetch: unknown) => {
+      authFetch = $fetch as AuthFetch
       return {}
     },
     fetchPlugins: [
@@ -131,7 +148,7 @@ export function restoreAnonymousSessionClient(): BetterAuthClientPlugin {
         id: "restore-anonymous-session-fetch",
         name: "Anonymous session restore",
         hooks: {
-          onSuccess({ data, request }) {
+          onSuccess({ data, request }: FetchSuccessContext) {
             if (typeof document === "undefined") {
               return
             }
@@ -168,5 +185,5 @@ export function restoreAnonymousSessionClient(): BetterAuthClientPlugin {
         },
       },
     ],
-  }
+  } satisfies BetterAuthClientPlugin
 }

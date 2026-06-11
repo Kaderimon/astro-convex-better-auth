@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import type { BetterAuthClientPlugin } from "better-auth/client"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { restoreAnonymousSessionClient } from "../../client/restore-anonymous-session-client"
 
@@ -24,7 +25,7 @@ function getPluginWithAuthFetch(error: { status: number } | null = null) {
     calls.push({ path, body: opts.body })
     return Promise.resolve({ error })
   }
-  plugin.getActions!(mockFetch as never, undefined as never, undefined as never)
+  plugin.getActions(mockFetch)
   return { fetchPlugin: plugin.fetchPlugins![0], calls }
 }
 
@@ -45,6 +46,15 @@ const SIGN_OUT_URL = "https://example.convex.site/api/auth/sign-out"
 const GET_SESSION_URL = "https://example.convex.site/api/auth/get-session"
 
 describe("restoreAnonymousSessionClient", () => {
+  it("returns a plugin assignable to BetterAuthClientPlugin", () => {
+    // The function's declared return type is a structural literal (not the
+    // BetterAuthClientPlugin interface) so consumers on a different
+    // better-auth patch version don't get cross-version interface errors —
+    // this assignment guards that the literal still satisfies the interface.
+    const plugin: BetterAuthClientPlugin = restoreAnonymousSessionClient()
+    expect(plugin.id).toBe("restore-anonymous-session")
+  })
+
   beforeEach(() => {
     vi.useFakeTimers()
     localStorage.clear()

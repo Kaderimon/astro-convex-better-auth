@@ -56,8 +56,7 @@ function createIntegration() {
           if (middlewareOptions) {
             addMiddleware({
               order: "pre",
-              entrypoint:
-                "astro-convex-better-auth/server/middleware-entrypoint",
+              entrypoint: "virtual:@convex-better-auth/middleware",
             })
           }
 

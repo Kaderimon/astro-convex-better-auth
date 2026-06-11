@@ -376,3 +376,31 @@ Three feature-tiered example apps live in [`examples/`](examples), each a comple
 >
 > On each SSR request the middleware reads the `better-auth.convex_jwt` and `better-auth.session_token` cookies, prefixes them with `__Secure-`, and sends them in a `Better-Auth-Cookie` header to `PUBLIC_CONVEX_SITE_URL/api/auth/get-session`. The JSON response is parsed and mapped to `context.locals.user` / `context.locals.session`. This is why `PUBLIC_CONVEX_SITE_URL` (the `.convex.site` URL, not `.convex.cloud`) is required — that endpoint is an HTTP action on the Convex backend.
 >
+
+---
+
+## Troubleshooting
+
+### Type errors about two incompatible `BetterAuthClientPlugin` / `BetterAuthPlugin` types
+
+If TypeScript reports that a plugin from one `@better-auth/core` path in `node_modules/.pnpm` is "not assignable" to the same type from another path, your dependency tree resolved **two different versions of `better-auth`** (for example `1.6.14` and `1.6.16`), and TypeScript refuses to mix their interfaces.
+
+Keep a single resolution:
+
+```bash
+pnpm dedupe
+```
+
+or pin one version for the whole tree in your root `package.json`:
+
+```jsonc
+{
+  "pnpm": { "overrides": { "better-auth": "1.6.16", "@better-auth/core": "1.6.16" } }
+}
+```
+
+(npm/yarn: use `overrides` / `resolutions`.) This can affect any better-auth plugin in the tree (`crossDomainClient()`, plugins in your Convex auth config, …) — deduping fixes them all at once.
+
+### `optimizeDeps` workarounds are not needed
+
+No published file in this package imports `virtual:` or `astro:` modules, so Vite's dependency optimizer can pre-bundle it normally. If an earlier setup led you to add `optimizeDeps: { exclude: ["astro-convex-better-auth"] }` (or the `ssr.optimizeDeps` equivalent) to your Astro config, you can remove it.

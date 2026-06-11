@@ -1,8 +1,10 @@
-import { convexBetterAuthMiddleware } from "astro-convex-better-auth/server"
-import { defineMiddleware, sequence } from "astro:middleware"
+import { defineMiddleware } from "astro:middleware"
 
 const PUBLIC_PATHS = new Set(["/auth"])
 
+// convexBetterAuthMiddleware runs before this guard — it is injected by the
+// integration's `autoMiddleware: true` (order: "pre"), so context.locals is
+// already populated here.
 const authGuard = defineMiddleware((context, next) => {
   const { pathname } = context.url
 
@@ -24,7 +26,4 @@ const authGuard = defineMiddleware((context, next) => {
   return next()
 })
 
-export const onRequest = sequence(
-  defineMiddleware(convexBetterAuthMiddleware()),
-  authGuard,
-)
+export const onRequest = authGuard

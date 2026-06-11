@@ -8,12 +8,6 @@ export default defineConfig({
   },
   resolve: {
     alias: {
-      "astro:middleware": path.resolve(
-        "tests/__mocks__/astro-middleware.ts",
-      ),
-      "virtual:@convex-better-auth/astro/config": path.resolve(
-        "tests/__mocks__/virtual-config.ts",
-      ),
       "astro/config": path.resolve("tests/__mocks__/astro-config.ts"),
     },
   },

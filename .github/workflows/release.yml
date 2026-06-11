@@ -50,8 +50,8 @@ jobs:
           echo '${{ steps.changesets.outputs.publishedPackages }}' | jq -c '.[]' | while read -r pkg; do
             name=$(jq -r .name <<<"$pkg")
             version=$(jq -r .version <<<"$pkg")
-            # changesets tags single-package repos as v<version>
-            tag="v$version"
+            # pnpm-workspace.yaml makes this a monorepo to changesets, so tags are <name>@<version>
+            tag="$name@$version"
             notes=$(gh release view "$tag" --json body -q .body)
             gh release edit "$tag" --notes "$notes"$'\n\n'"📦 [\`$name@$version\` on npm](https://www.npmjs.com/package/$name/v/$version)"
           done
